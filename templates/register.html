@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Register — ScamCheck AI</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body class="auth-page">
+<div class="auth-container">
+  <div class="auth-card">
+    <div class="auth-header">
+      <a href="/" class="auth-logo-link" title="Back to Home">
+        <svg class="logo-svg auth-logo-svg" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="shieldGradR" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#60a5fa"/>
+              <stop offset="50%" stop-color="#3b82f6"/>
+              <stop offset="100%" stop-color="#2563eb"/>
+            </linearGradient>
+            <linearGradient id="checkGradR" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="100%" stop-color="#dbeafe"/>
+            </linearGradient>
+            <radialGradient id="innerGlowR" cx="50%" cy="40%" r="50%">
+              <stop offset="0%" stop-color="#93c5fd" stop-opacity="0.6"/>
+              <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+            </radialGradient>
+            <filter id="softGlowR" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="0.8" result="blur"/>
+              <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+            </filter>
+          </defs>
+          <g filter="url(#softGlowR)">
+            <path d="M32 3 L55 12 C55 12 58 38 32 61 C6 38 9 12 9 12 Z"
+                  fill="url(#shieldGradR)" stroke="#93c5fd" stroke-width="1"/>
+            <path d="M32 7 L51 15 C51 15 54 37 32 57 C10 37 13 15 13 15 Z"
+                  fill="url(#innerGlowR)"/>
+            <path d="M20 30 L28 40 L46 20"
+                  fill="none" stroke="url(#checkGradR)" stroke-width="4.5"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+            <g stroke="#bfdbfe" stroke-width="1.2" stroke-linecap="round" fill="none" opacity="0.7">
+              <circle cx="40" cy="18" r="1.5" fill="#bfdbfe"/>
+              <circle cx="15" cy="24" r="1.2" fill="#bfdbfe"/>
+              <path d="M40 18 L40 24 L46 24"/>
+              <path d="M15 24 L15 29 L20 29"/>
+              <circle cx="22" cy="48" r="1.2" fill="#bfdbfe"/>
+              <path d="M22 48 L22 44 L26 44"/>
+            </g>
+          </g>
+        </svg>
+      </a>
+      <h1>ScamCheck <span class="brand-ai">AI</span></h1>
+      <p>Create your free account</p>
+    </div>
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <div class="flash-msg">{{ messages[0] }}</div>
+    {% endif %}
+    {% endwith %}
+
+    <!-- ══ SOCIAL SIGNUP ══ -->
+    <div class="auth-social-buttons">
+      <a href="/auth/google" class="social-btn btn-google" title="Sign up with Google">
+        <svg class="social-icon" viewBox="0 0 24 24">
+          <path fill="#EA4335" d="M12 5c1.56 0 2.96.54 4.07 1.6l3.05-3.05C17.26 1.8 14.82 1 12 1 7.42 1 3.53 3.61 1.7 7.43l3.66 2.84C6.24 7.48 8.88 5 12 5z"/>
+          <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58l3.66 2.84c2.14-1.98 3.76-4.9 3.76-8.66z"/>
+          <path fill="#FBBC05" d="M5.36 14.27A7.05 7.05 0 0 1 5 12c0-.79.13-1.57.36-2.27L1.7 6.89C.62 9.04 0 10.45 0 12c0 1.55.62 2.96 1.7 5.11l3.66-2.84z"/>
+          <path fill="#34A853" d="M12 23c3.24 0 5.95-1.08 7.93-2.91l-3.66-2.84c-1.07.72-2.45 1.15-4.27 1.15-3.12 0-5.76-2.48-6.64-5.27L1.7 15.97C3.53 19.79 7.42 23 12 23z"/>
+        </svg>
+        <span>Sign up with Google</span>
+      </a>
+
+      <div class="social-row-dual">
+        <a href="/auth/facebook" class="social-btn btn-facebook" title="Sign up with Facebook">
+          <svg class="social-icon" viewBox="0 0 24 24" fill="#1877F2">
+            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+          </svg>
+          <span>Facebook</span>
+        </a>
+
+        <a href="/auth/github" class="social-btn btn-github" title="Sign up with GitHub">
+          <svg class="social-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+          </svg>
+          <span>GitHub</span>
+        </a>
+      </div>
+    </div>
+
+    <div class="auth-divider">
+      <span>or register with email</span>
+    </div>
+
+    <form method="POST" class="auth-form">
+      <div class="auth-field">
+        <label>Full Name</label>
+        <input type="text" name="name" placeholder="Juan Dela Cruz" required>
+      </div>
+      <div class="auth-field">
+        <label>Email Address</label>
+        <input type="email" name="email" placeholder="you@example.com" required>
+      </div>
+      <div class="auth-field">
+        <label>Password</label>
+        <input type="password" name="password" placeholder="At least 6 characters" required minlength="6">
+      </div>
+      <div class="auth-field">
+        <label>Confirm Password</label>
+        <input type="password" name="confirm" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="auth-submit">Create Account</button>
+    </form>
+
+    <p class="auth-link">Already have an account? <a href="/login">Sign in</a></p>
+    <p class="auth-link auth-back-link"><a href="/">← Back to Landing Page</a></p>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enterprise Security & Operations Center — ScamCheck AI</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="admin-body">
+
+  <!-- ══════════════════════════════
+       ADMIN TOPBAR
+       ══════════════════════════════ -->
+  <header class="admin-topbar">
+    <div class="admin-nav-container">
+      <div class="admin-brand">
+        <svg class="logo-svg" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="shieldGradA" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#60a5fa"/>
+              <stop offset="50%" stop-color="#3b82f6"/>
+              <stop offset="100%" stop-color="#2563eb"/>
+            </linearGradient>
+            <linearGradient id="checkGradA" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="100%" stop-color="#dbeafe"/>
+            </linearGradient>
+            <radialGradient id="innerGlowA" cx="50%" cy="40%" r="50%">
+              <stop offset="0%" stop-color="#93c5fd" stop-opacity="0.6"/>
+              <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+            </radialGradient>
+            <filter id="softGlowA" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="0.8" result="blur"/>
+              <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+            </filter>
+          </defs>
+          <g filter="url(#softGlowA)">
+            <path d="M32 3 L55 12 C55 12 58 38 32 61 C6 38 9 12 9 12 Z"
+                  fill="url(#shieldGradA)" stroke="#93c5fd" stroke-width="1"/>
+            <path d="M32 7 L51 15 C51 15 54 37 32 57 C10 37 13 15 13 15 Z"
+                  fill="url(#innerGlowA)"/>
+            <path d="M20 30 L28 40 L46 20"
+                  fill="none" stroke="url(#checkGradA)" stroke-width="4.5"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+            <g stroke="#bfdbfe" stroke-width="1.2" stroke-linecap="round" fill="none" opacity="0.7">
+              <circle cx="40" cy="18" r="1.5" fill="#bfdbfe"/>
+              <circle cx="15" cy="24" r="1.2" fill="#bfdbfe"/>
+              <path d="M40 18 L40 24 L46 24"/>
+              <path d="M15 24 L15 29 L20 29"/>
+              <circle cx="22" cy="48" r="1.2" fill="#bfdbfe"/>
+              <path d="M22 48 L22 44 L26 44"/>
+            </g>
+          </g>
+        </svg>
+        <div class="admin-title-box">
+          <span class="brand-text">ScamCheck <span class="brand-ai">AI</span></span>
+          <span class="admin-badge">ENTERPRISE SOC & OPS</span>
+        </div>
+      </div>
+
+      <div class="admin-actions">
+        <div class="under-attack-pill {% if telemetry.under_attack_mode %}active{% endif %}" id="topAttackPill">
+          <span class="pulse-dot-red"></span>
+          <span>Under Attack Mode: <b id="topAttackStatus">{% if telemetry.under_attack_mode %}ACTIVE{% else %}OFF{% endif %}</b></span>
+        </div>
+        <a href="/app" class="btn-admin-nav"><span>🔎</span> Scanner App</a>
+        <a href="/" class="btn-admin-nav"><span>🏠</span> Landing</a>
+        <div class="admin-user-tag">
+          <span class="status-indicator live"></span>
+          <span>Admin: <b>{{ admin_user }}</b></span>
+        </div>
+        <a href="/logout" class="btn-admin-logout">Logout</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- ══════════════════════════════
+       ADMIN SUBNAV / MODULAR TABS
+       ══════════════════════════════ -->
+  <div class="admin-tabs-bar">
+    <div class="admin-tabs-container">
+      <button class="adm-tab active" onclick="switchAdminTab('tab-overview', this)">
+        <span>📊</span> 1. Dashboard & Analytics
+      </button>
+      <button class="adm-tab" onclick="switchAdminTab('tab-threats', this)">
+        <span>🚨</span> 2. Cyber Threat & Vuln Scanner
+      </button>
+      <button class="adm-tab" onclick="switchAdminTab('tab-copilot', this)">
+        <span>🤖</span> 3. AI Copilot Terminal
+      </button>
+      <button class="adm-tab" onclick="switchAdminTab('tab-database', this)">
+        <span>💾</span> 4. Database & Backups
+      </button>
+      <button class="adm-tab" onclick="switchAdminTab('tab-users', this)">
+        <span>👥</span> 5. Users & RBAC
+      </button>
+      <button class="adm-tab" onclick="switchAdminTab('tab-maintenance', this)">
+        <span>⚙️</span> 6. Self-Healing & Cron
+      </button>
+    </div>
+  </div>
+
+  <main class="admin-main">
+    <div class="admin-container">
+
+      <!-- ═══════════════════════════════════════════════════
+           TAB 1: DASHBOARD & REAL-TIME ANALYTICS
+           ═══════════════════════════════════════════════════ -->
+      <div id="tab-overview" class="admin-tab-pane active">
+        <!-- Overview Header -->
+        <div class="admin-header-row">
+          <div>
+            <span class="admin-eyebrow">MODULE 1 • REAL-TIME SERVER TELEMETRY</span>
+            <h1 class="admin-heading">Live Operations & Telemetry Overview</h1>
+            <p class="admin-subheading">Real-time resource utilization, health metrics, and traffic volume.</p>
+          </div>
+          <div class="admin-header-btns">
+            <button class="btn-admin-primary" onclick="refreshLiveTelemetry()">
+              <span>🔄</span> Refresh Telemetry
+            </button>
+          </div>
+        </div>
+
+        <!-- Health & KPI Grid -->
+        <div class="telemetry-top-grid">
+          <!-- Health Score Card -->
+          <div class="health-card">
+            <div class="health-card-head">
+              <span class="health-lbl">System Health Score</span>
+              <span class="health-status-badge">OPTIMAL</span>
+            </div>
+            <div class="health-ring-wrap">
+              <div class="health-ring-val" id="healthVal">{{ telemetry.health_score }}%</div>
+              <span class="health-ring-sub">Operational Status</span>
+            </div>
+            <div class="health-breakdown">
+              <div class="h-item"><span>Server Latency:</span> <b id="latencyVal">{{ telemetry.latency_ms }} ms</b></div>
+              <div class="h-item"><span>Under Attack Mode:</span> <b id="healthAttackStatus">{% if telemetry.under_attack_mode %}ENABLED{% else %}STANDBY{% endif %}</b></div>
+            </div>
+          </div>
+
+          <!-- Resource Utilization Gauges -->
+          <div class="resource-gauges-card">
+            <div class="resource-head">
+              <span class="breakdown-title">⚡ Real-Time Resource Utilization</span>
+              <span class="badge-count">Live Polling</span>
+            </div>
+            
+            <div class="gauges-list">
+              <!-- CPU -->
+              <div class="gauge-item">
+                <div class="gauge-info">
+                  <span>💻 CPU Utilization</span>
+                  <b id="cpuText">{{ telemetry.cpu_percent }}%</b>
+                </div>
+                <div class="gauge-bar"><div class="gauge-fill" id="cpuFill" style="width: {{ telemetry.cpu_percent }}%"></div></div>
+              </div>
+
+              <!-- RAM -->
+              <div class="gauge-item">
+                <div class="gauge-info">
+                  <span>🧠 RAM / Memory Usage</span>
+                  <b id="ramText">{{ telemetry.ram_used_gb }} GB / {{ telemetry.ram_total_gb }} GB ({{ telemetry.ram_percent }}%)</b>
+                </div>
+                <div class="gauge-bar"><div class="gauge-fill purple" id="ramFill" style="width: {{ telemetry.ram_percent }}%"></div></div>
+              </div>
+
+              <!-- Disk -->
+              <div class="gauge-item">
+                <div class="gauge-info">
+                  <span>💽 Disk Storage</span>
+                  <b id="diskText">{{ telemetry.disk_used_gb }} GB / {{ telemetry.disk_total_gb }} GB ({{ telemetry.disk_percent }}%)</b>
+                </div>
+                <div class="gauge-bar"><div class="gauge-fill green" id="diskFill" style="width: {{ telemetry.disk_percent }}%"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4 Stat Metric Cards -->
+        <div class="admin-stats-grid">
+          <div class="admin-stat-card">
+            <div class="stat-card-head"><span class="stat-icon blue">👥</span><span class="stat-tag info">Total Requests</span></div>
+            <span class="stat-val">{{ stats.total_visits }}</span>
+            <span class="stat-meta">Recorded visits & API scans</span>
+          </div>
+
+          <div class="admin-stat-card highlight-danger">
+            <div class="stat-card-head"><span class="stat-icon red">🚨</span><span class="stat-tag danger">Threats Intercepted</span></div>
+            <span class="stat-val text-red">{{ stats.total_attacks }}</span>
+            <span class="stat-meta">SQLi, XSS, Scanners & Bots</span>
+          </div>
+
+          <div class="admin-stat-card">
+            <div class="stat-card-head"><span class="stat-icon green">🌐</span><span class="stat-tag success">Unique IP Endpoints</span></div>
+            <span class="stat-val">{{ stats.unique_ips }}</span>
+            <span class="stat-meta">Client networks monitored</span>
+          </div>
+
+          <div class="admin-stat-card">
+            <div class="stat-card-head"><span class="stat-icon amber">🚫</span><span class="stat-tag warning">Banned Blacklist</span></div>
+            <span class="stat-val text-amber">{{ stats.blocked_count }}</span>
+            <span class="stat-meta">Banned malicious IPs</span>
+          </div>
+        </div>
+
+        <!-- Visual Charts Grid -->
+        <div class="admin-grid-2col">
+          <div class="admin-panel-card">
+            <div class="panel-head">
+              <div class="panel-title"><span>📈</span><h3>24-Hour Traffic & Request Flow</h3></div>
+              <span class="badge-count">Hourly Volume</span>
+            </div>
+            <div class="chart-container-box">
+              <canvas id="trafficChart"></canvas>
+            </div>
+          </div>
+
+          <div class="admin-panel-card">
+            <div class="panel-head">
+              <div class="panel-title"><span>🎯</span><h3>Threat Vectors & Attack Distribution</h3></div>
+              <span class="badge-count danger">Detected Vectors</span>
+            </div>
+            <div class="chart-container-box">
+              <canvas id="threatPieChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- ═══════════════════════════════════════════════════
+           TAB 2: AUTOMATED CYBERSECURITY & VULNERABILITY SCANNER
+           ═══════════════════════════════════════════════════ -->
+      <div id="tab-threats" class="admin-tab-pane">
+        <div class="admin-header-row">
+          <div>
+            <span class="admin-eyebrow">MODULE 2 • CYBER DEFENSE & INTRUSION DETECTION</span>
+            <h1 class="admin-heading">Automated Threat Detection & Vulnerability Audit</h1>
+            <p class="admin-subheading">Intrusion monitoring, vulnerability scanning, attack simulator, and IP blacklist controls.</p>
+          </div>
+          <div class="admin-header-btns">
+            <button class="btn-admin-primary" onclick="triggerVulnScan()">
+              <span>🛡️</span> Run Full Vulnerability Audit
+            </button>
+          </div>
+        </div>
+
+        <!-- Vulnerability Audit Report Banner -->
+        <div class="vuln-report-card" id="vulnReportBox">
+          <div class="vuln-head">
+            <div class="vuln-title-box">
+              <span class="vuln-icon">🛡️</span>
+              <div>
+                <h3>System Vulnerability & Dependency Rating: <span class="text-green" id="vulnScore">{{ vuln_audit.risk_score }} / 100 (SECURE)</span></h3>
+                <p>Audited at: <span id="vulnTimestamp">{{ vuln_audit.timestamp }}</span> • {{ vuln_audit.total_checks }} Security Checks Executed</p>
+              </div>
+            </div>
+            <span class="badge-count success">All Clear</span>
+          </div>
+
+          <div class="vuln-items-grid" id="vulnListContainer">
+            {% for v in vuln_audit.vulnerabilities %}
+              <div class="vuln-item {{ v.severity|lower }}">
+                <div class="vuln-item-top">
+                  <span class="vuln-cat">{{ v.category }}</span>
+                  <span class="vuln-sev {{ v.severity|lower }}">{{ v.severity }}</span>
+                </div>
+                <h4>{{ v.title }}</h4>
+                <p>{{ v.details }}</p>
+                <div class="vuln-remed"><b>Remediation:</b> {{ v.remediation }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Simulator Toolbox -->
+        <div class="admin-simulator-card">
+          <div class="simulator-head">
+            <div class="sim-title">
+              <span class="sim-icon">⚡</span>
+              <div>
+                <h3>Interactive Threat & Attack Simulator</h3>
+                <p>Test the live intrusion detection engine with test payloads to verify real-time monitoring.</p>
+              </div>
+            </div>
+          </div>
+          <div class="simulator-actions">
+            <button class="btn-sim sqli" onclick="simulateAttack('SQL_INJECTION')"><span>💉</span> Simulate SQL Injection</button>
+            <button class="btn-sim xss" onclick="simulateAttack('XSS_ATTACK')"><span>⚠️</span> Simulate XSS Attack</button>
+            <button class="btn-sim bot" onclick="simulateAttack('MALICIOUS_BOT')"><span>🤖</span> Simulate Scanner Bot</button>
+            <button class="btn-sim lfi" onclick="simulateAttack('PATH_TRAVERSAL')"><span>📁</span> Simulate Path Traversal</button>
+          </div>
+        </div>
+
+        <!-- Two Column: Live Threats & Blacklist -->
+        <div class="admin-grid-2col">
+          <!-- Attack Feed -->
+          <div class="admin-panel-card">
+            <div class="panel-head">
+              <div class="panel-title"><span class="dot-blink-red"></span><h3>Live Intercepted Threat Stream</h3></div>
+              <span class="badge-count danger">{{ attacks|length }} Recent</span>
+            </div>
+            <div class="attack-feed-list">
+              {% if attacks %}
+                {% for atk in attacks %}
+                  <div class="attack-feed-item {{ atk.threat_level|lower }}">
+                    <div class="atk-top">
+                      <span class="atk-type-badge {{ atk.threat_level|lower }}">
+                        {% if atk.type == 'SQL_INJECTION' %}💉 SQL Injection
+                        {% elif atk.type == 'XSS_ATTACK' %}⚠️ XSS Attack
+                        {% elif atk.type == 'PATH_TRAVERSAL' %}📁 Path Traversal
+                        {% elif atk.type == 'MALICIOUS_BOT' %}🤖 Bot Scanner
+                        {% else %}🚨 {{ atk.type }}{% endif %}
+                      </span>
+                      <span class="atk-time">{{ atk.timestamp }}</span>
+                    </div>
+                    <div class="atk-details">
+                      <div class="atk-row">
+                        <span class="atk-lbl">Source IP:</span>
+                        <code class="ip-code">{{ atk.ip }}</code>
+                        {% if atk.is_blocked %}
+                          <span class="tag-blocked">BLOCKED</span>
+                        {% else %}
+                          <button class="btn-quick-block" onclick="toggleBlockIp('{{ atk.ip }}')">Block IP</button>
+                        {% endif %}
+                      </div>
+                      <div class="atk-row"><span class="atk-lbl">Target:</span><code class="path-code">{{ atk.method }} {{ atk.path }}</code></div>
+                      <div class="atk-row"><span class="atk-lbl">Client:</span><span class="device-tag">{{ atk.device }} • {{ atk.os }} ({{ atk.browser }})</span></div>
+                      {% if atk.payload %}
+                        <div class="atk-payload-box"><span class="payload-lbl">Payload:</span><code>{{ atk.payload }}</code></div>
+                      {% endif %}
+                    </div>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <div class="empty-feed"><span>🛡️</span><p>No active threats detected. System is running cleanly.</p></div>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- IP Blacklist Manager -->
+          <div class="admin-panel-card">
+            <div class="panel-head">
+              <div class="panel-title"><span>🚫</span><h3>IP Blacklist & Banning Manager</h3></div>
+              <span class="badge-count">{{ blocked_ips|length }} Blocked</span>
+            </div>
+            <div class="breakdown-body">
+              <form class="block-form" onsubmit="handleManualBlock(event)">
+                <input type="text" id="manualIpInput" placeholder="Enter IP (e.g. 203.177.135.50)" required>
+                <button type="submit" class="btn-block-submit">Ban IP</button>
+              </form>
+              <div class="blocked-ip-list">
+                {% if blocked_ips %}
+                  {% for bip in blocked_ips %}
+                    <div class="blocked-ip-item">
+                      <div class="bip-info"><span class="bip-icon">🚫</span><code>{{ bip }}</code></div>
+                      <button class="btn-unblock" onclick="toggleBlockIp('{{ bip }}')">Unblock</button>
+                    </div>
+                  {% endfor %}
+                {% else %}
+                  <p class="text-muted small">No IPs currently blacklisted.</p>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Full Audit Logs Table -->
+        <div class="admin-panel-card full-width">
+          <div class="panel-head filterable">
+            <div class="panel-title"><span>📋</span><h3>Complete Access Control & Request Audit Logs</h3></div>
+            <div class="log-filter-buttons">
+              <button class="btn-filter active" onclick="filterLogs('ALL')">All Requests ({{ logs|length }})</button>
+              <button class="btn-filter" onclick="filterLogs('ATTACK')">Attacks Only ({{ stats.total_attacks }})</button>
+              <button class="btn-filter" onclick="filterLogs('VISIT')">Visits Only</button>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="admin-table" id="auditTable">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Severity</th>
+                  <th>Client IP</th>
+                  <th>Device & OS</th>
+                  <th>Browser</th>
+                  <th>Path Visited</th>
+                  <th>User</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for log in logs %}
+                  <tr class="log-row" data-type="{% if log.threat_level in ['CRITICAL', 'HIGH', 'WARNING'] %}ATTACK{% else %}VISIT{% endif %}">
+                    <td class="col-time">{{ log.timestamp }}</td>
+                    <td>
+                      {% if log.threat_level == 'CRITICAL' %}<span class="badge-status critical">🚨 CRITICAL</span>
+                      {% elif log.threat_level == 'HIGH' %}<span class="badge-status high">⚠️ HIGH THREAT</span>
+                      {% elif log.threat_level == 'WARNING' %}<span class="badge-status warning">⚡ SUSPICIOUS</span>
+                      {% else %}<span class="badge-status safe">✓ NORMAL</span>{% endif %}
+                    </td>
+                    <td><code class="ip-code">{{ log.ip }}</code>{% if log.is_blocked %}<span class="tag-blocked-mini">BLOCKED</span>{% endif %}</td>
+                    <td><span class="device-badge">{{ log.device }} ({{ log.os }})</span></td>
+                    <td class="col-browser">{{ log.browser }}</td>
+                    <td><code class="path-code-sm">{{ log.method }} {{ log.path }}</code></td>
+                    <td><span class="user-pill">{{ log.user }}</span></td>
+                    <td>
+                      {% if log.is_blocked %}
+                        <button class="btn-table-action unblock" onclick="toggleBlockIp('{{ log.ip }}')">Unblock</button>
+                      {% else %}
+                        <button class="btn-table-action block" onclick="toggleBlockIp('{{ log.ip }}')">Block IP</button>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- ═══════════════════════════════════════════════════
+           TAB 3: AI COPILOT / CHAT ASSISTANT FOR ADMINS
+           ═══════════════════════════════════════════════════ -->
+      <div id="tab-copilot" class="admin-tab-pane">
+        <div class="admin-header-row">
+          <div>
+            <span class="admin-eyebrow">MODULE 3 • NATURAL LANGUAGE AI COMMAND TERMINAL</span>
+            <h1 class="admin-heading">AI Admin Copilot & Troubleshooting Assistant</h1>
+            <p class="admin-subheading">Execute server operations and troubleshoot logs using conversational Tagalog or English.</p>
+          </div>
+        </div>
+
+        <div class="copilot-layout">
+          <!-- Terminal & Chat Window -->
+          <div class="copilot-chat-card">
+            <div class="copilot-head">
+              <div class="copilot-bot-info">
+                <span class="copilot-avatar">🤖</span>
+                <div>
+                  <h3>ScamCheck AI Admin Copilot</h3>
+                  <span class="copilot-status">● Ready for commands (Tagalog / English)</span>
+                </div>
+              </div>
+              <span class="copilot-badge">NL CLI v2.4</span>
+            </div>
+
+            <!-- Messages Stream -->
+            <div class="copilot-messages" id="copilotMsgBox">
+              <div class="msg-bot">
+                <span class="bot-icon">🤖</span>
+                <div class="bot-text">
+                  <b>Magandang araw, Administrator!</b> Ako ang iyong AI Copilot. Maaari mo akong utusan na magpatakbo ng server operations o sumuri ng threats gamit ang simpleng Tagalog o English.
+                  <div class="sample-chips">
+                    <span onclick="sendPrompt('I-block ang IP 203.177.135.10')">💡 "I-block ang IP 203.177.135.10"</span>
+                    <span onclick="sendPrompt('Mag-scan ng system vulnerabilities')">🛡️ "Mag-scan ng system vulnerabilities"</span>
+                    <span onclick="sendPrompt('I-backup ang database ngayon')">💾 "I-backup ang database ngayon"</span>
+                    <span onclick="sendPrompt('Linisin ang cache at logs')">⚡ "Linisin ang cache at logs"</span>
+                    <span onclick="sendPrompt('Kumusta ang system health')">📊 "Kumusta ang system health"</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Input Bar -->
+            <form class="copilot-input-form" onsubmit="handleCopilotSubmit(event)">
+              <input type="text" id="copilotInput" placeholder="Type a natural command (e.g. 'I-block ang IP 192.168.1.1' or 'Run security audit')..." autocomplete="off">
+              <button type="submit" class="btn-copilot-send" id="btnCopilotSend">Execute ↵</button>
+            </form>
+          </div>
+
+          <!-- Quick Command Cheat Sheet -->
+          <div class="copilot-sidebar-card">
+            <h3>⚡ Command Capabilities</h3>
+            <ul class="capability-list">
+              <li><b>IP Firewall:</b> <i>"I-block ang IP..."</i>, <i>"Unblock IP..."</i></li>
+              <li><b>Vulnerability Scan:</b> <i>"Suriin ang security vulnerabilities"</i></li>
+              <li><b>Database Backup:</b> <i>"Mag-create ng database snapshot"</i></li>
+              <li><b>Storage Cleaner:</b> <i>"Linisin ang duplicate accounts at cache"</i></li>
+              <li><b>Defense Mode:</b> <i>"Enable Under Attack Mode"</i></li>
+              <li><b>Health Diagnostic:</b> <i>"Status ng CPU at memory"</i></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- ═══════════════════════════════════════════════════
+           TAB 4: DATABASE & STORAGE MANAGEMENT
+           ═══════════════════════════════════════════════════ -->
+      <div id="tab-database" class="admin-tab-pane">
+        <div class="admin-header-row">
+          <div>
+            <span class="admin-eyebrow">MODULE 4 • STORAGE & DATA RESILIENCE</span>
+            <h1 class="admin-heading">Database Snapshot & Storage Optimization</h1>
+            <p class="admin-subheading">Manage automated snapshots, restore historical backups, and optimize JSON query storage.</p>
+          </div>
+          <div class="admin-header-btns">
+            <button class="btn-admin-primary" onclick="createInstantBackup()">
+              <span>💾</span> Create Instant Backup Now
+            </button>
+            <button class="btn-admin-nav" onclick="optimizeDbStorage()">
+              <span>⚡</span> Optimize & Compact Storage
+            </button>
+          </div>
+        </div>
+
+        <div class="admin-grid-2col">
+          <!-- Backups Table -->
+          <div class="admin-panel-card">
+            <div class="panel-head">
+              <div class="panel-title"><span>📦</span><h3>Historical Database Snapshots</h3></div>
+              <span class="badge-count" id="backupCountBadge">{{ backups|length }} Backups</span>
+            </div>
+            <div class="table-responsive">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>Backup Filename</th>
+                    <th>Created At</th>
+                    <th>Size</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="backupsTableBody">
+                  {% if backups %}
+                    {% for b in backups %}
+                      <tr>
+                        <td><code class="path-code">{{ b.filename }}</code></td>
+                        <td class="col-time">{{ b.created_at }}</td>
+                        <td><span class="badge-count">{{ b.size_kb }} KB</span></td>
+                        <td>
+                          <button class="btn-table-action unblock" onclick="restoreBackupFile('{{ b.filename }}')">Restore</button>
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  {% else %}
+                    <tr><td colspan="4" class="text-center py-3">No backups created yet.</td></tr>
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Storage Optimizer Info -->
+          <div class="admin-panel-card">
+            <div class="panel-head">
+              <div class="panel-title"><span>⚡</span><h3>Query & Storage Optimizer</h3></div>
+            </div>
+            <div class="breakdown-body">
+              <div class="opt-card">
+                <h4>JSON Table Health Status</h4>
+                <p>System automatically indexes user credentials, compresses telemetry records beyond 500 rows, and strips duplicate entries.</p>
+                <div class="opt-metrics">
+                  <div class="opt-metric-item"><span>User Records:</span> <b>{{ users_list|length }} accounts</b></div>
+                  <div class="opt-metric-item"><span>Audit Logs:</span> <b>{{ logs|length }} telemetry rows</b></div>
+                  <div class="opt-metric-item"><span>Blacklist Entries:</span> <b>{{ blocked_ips|length }} IPs</b></div>
+                </div>
+                <button class="btn-admin-primary" onclick="optimizeDbStorage()" style="width: 100%; margin-top: 16px;">
+                  🚀 Run Database Optimization & Garbage Collector
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- ═══════════════════════════════════════════════════
+           TAB 5: USER & ROLE MANAGEMENT (RBAC)
+           ═══════════════════════════════════════════════════ -->
+      <div id="tab-users" class="admin-tab-pane">
+        <div class="admin-header-row">
+          <div>
+            <span class="admin-eyebrow">MODULE 5 • ACCESS CONTROL & PERMISSIONS</span>
+            <h1 class="admin-heading">User Directory & Role-Based Access Control (RBAC)</h1>
+            <p class="admin-subheading">Assign administrative roles, review sign-in providers, and manage account statuses.</p>
+          </div>
+        </div>
+
+        <div class="admin-panel-card full-width">
+          <div class="panel-head">
+            <div class="panel-title"><span>👥</span><h3>Registered User Accounts Directory</h3></div>
+            <span class="badge-count">{{ users_list|length }} Total Users</span>
+          </div>
+
+          <div class="table-responsive">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>User Full Name</th>
+                  <th>Email Address</th>
+                  <th>Login Provider</th>
+                  <th>Assigned Role</th>
+                  <th>Account Status</th>
+                  <th>Registered At</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for u in users_list %}
+                  <tr>
+                    <td><b>{{ u.name }}</b></td>
+                    <td><code>{{ u.email }}</code></td>
+                    <td>
+                      <span class="provider-pill {{ u.provider|lower }}">
+                        {% if u.provider == 'Google' %}🌐 Google
+                        {% elif u.provider == 'Facebook' %}📘 Facebook
+                        {% elif u.provider == 'Github' %}🐙 GitHub
+                        {% elif u.provider == 'Admin' %}🛡️ System Admin
+                        {% else %}✉️ Email{% endif %}
+                      </span>
+                    </td>
+                    <td>
+                      <select class="role-select" onchange="updateUserRole('{{ u.email }}', this.value)">
+                        <option value="Admin" {% if u.role == 'Admin' %}selected{% endif %}>🛡️ Admin</option>
+                        <option value="Security Analyst" {% if u.role == 'Security Analyst' %}selected{% endif %}>🔎 Security Analyst</option>
+                        <option value="Standard User" {% if u.role == 'Standard User' %}selected{% endif %}>👤 Standard User</option>
+                      </select>
+                    </td>
+                    <td>
+                      <span class="status-pill {% if u.status == 'Active' %}active{% else %}suspended{% endif %}">
+                        {{ u.status }}
+                      </span>
+                    </td>
+                    <td class="col-time">{{ u.created_at }}</td>
+                    <td>
+                      <button class="btn-table-action" onclick="editUserAccount({{ u.email|tojson }}, {{ u.name|tojson }})">Edit</button>
+                      <button class="btn-table-action {% if u.status == 'Active' %}block{% else %}unblock{% endif %}" onclick="toggleUserStatus('{{ u.email }}')">
+                        {% if u.status == 'Active' %}Suspend{% else %}Activate{% endif %}
+                      </button>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- ═══════════════════════════════════════════════════
+           TAB 6: AUTOMATED MAINTENANCE & SELF-HEALING
+           ═══════════════════════════════════════════════════ -->
+      <div id="tab-maintenance" class="admin-tab-pane">
+        <div class="admin-header-row">
+          <div>
+            <span class="admin-eyebrow">MODULE 6 • AUTO-SCALING & SELF-HEALING</span>
+            <h1 class="admin-heading">Automated Maintenance & Self-Healing Engine</h1>
+            <p class="admin-subheading">Configure Under Attack defense triggers, auto-healing routines, and scheduled cron jobs.</p>
+          </div>
+        </div>
+
+        <div class="admin-grid-2col">
+          <!-- Defense Mode Switch -->
+          <div class="admin-panel-card">
+            <div class="panel-head">
+              <div class="panel-title"><span>🛡️</span><h3>Under Attack Defense Shield</h3></div>
+              <span class="badge-count" id="shieldBadge">{% if telemetry.under_attack_mode %}ACTIVE{% else %}STANDBY{% endif %}</span>
+            </div>
+            <div class="breakdown-body">
+              <p>When activated, the system enforces aggressive IP rate-limiting, rejects automated penetration bots, and challenges burst traffic.</p>
+              <div class="toggle-wrap">
+                <span>Under Attack Protection:</span>
+                <button class="btn-toggle-attack {% if telemetry.under_attack_mode %}active{% endif %}" id="btnUnderAttack" onclick="toggleUnderAttackMode()">
+                  {% if telemetry.under_attack_mode %}ENABLED (Click to Disable){% else %}DISABLED (Click to Enable){% endif %}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Automated Cron Tasks -->
+          <div class="admin-panel-card">
+            <div class="panel-head">
+              <div class="panel-title"><span>⏰</span><h3>Scheduled Tasks & Self-Healing Cron Jobs</h3></div>
+            </div>
+            <div class="breakdown-body">
+              <div class="cron-task-item">
+                <div class="cron-info">
+                  <b>Nightly Cache & Log Vacuum</b>
+                  <span>Runs daily at 00:00 UTC to compact audit trails.</span>
+                </div>
+                <span class="cron-tag">ACTIVE (DAILY)</span>
+              </div>
+              <div class="cron-task-item">
+                <div class="cron-info">
+                  <b>IP Blacklist Expiration Sweep</b>
+                  <span>Removes temporary rate-limit blocks older than 24 hours.</span>
+                </div>
+                <span class="cron-tag">ACTIVE (HOURLY)</span>
+              </div>
+              <div class="cron-task-item">
+                <div class="cron-info">
+                  <b>Automated Health Snapshot</b>
+                  <span>Takes a backup snapshot of database daily.</span>
+                </div>
+                <span class="cron-tag">ACTIVE (DAILY)</span>
+              </div>
+
+              <button class="btn-admin-primary" onclick="runSelfHealingMaintenance()" style="margin-top: 14px;">
+                ⚡ Execute Self-Healing Routine Now
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ══════════════════════════════
+       ADMIN INTERACTIVE SCRIPTS
+       ══════════════════════════════ -->
+  <script>
+    // Tab Switcher
+    function switchAdminTab(tabId, btn) {
+      document.querySelectorAll('.adm-tab').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.admin-tab-pane').forEach(p => p.classList.remove('active'));
+      
+      btn.classList.add('active');
+      document.getElementById(tabId).classList.add('active');
+
+      if (tabId === 'tab-overview') {
+        initCharts();
+      }
+    }
+
+    // Chart.js Initialization
+    let trafficChartInstance = null;
+    let threatChartInstance = null;
+
+    function initCharts() {
+      if (trafficChartInstance) return;
+
+      const ctxTraffic = document.getElementById('trafficChart');
+      if (ctxTraffic) {
+        trafficChartInstance = new Chart(ctxTraffic, {
+          type: 'line',
+          data: {
+            labels: ['00:00', '03:00', '06:00', '09:00', '12:00', '15:00', '18:00', '21:00'],
+            datasets: [
+              {
+                label: 'Normal Requests',
+                data: [12, 18, 45, 120, 180, 240, 190, 160],
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                tension: 0.3,
+                fill: true
+              },
+              {
+                label: 'Intercepted Threats',
+                data: [1, 0, 3, 14, 22, 18, 9, 7],
+                borderColor: '#ef4444',
+                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                tension: 0.3,
+                fill: true
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#94a3b8' } } },
+            scales: {
+              x: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } },
+              y: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } }
+            }
+          }
+        });
+      }
+
+      const ctxThreat = document.getElementById('threatPieChart');
+      if (ctxThreat) {
+        threatChartInstance = new Chart(ctxThreat, {
+          type: 'doughnut',
+          data: {
+            labels: ['SQL Injection', 'XSS Scripting', 'Scanner Bots', 'Path Traversal'],
+            datasets: [{
+              data: [35, 25, 30, 10],
+              backgroundColor: ['#ef4444', '#f59e0b', '#8b5cf6', '#10b981'],
+              borderWidth: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8' } } }
+          }
+        });
+      }
+    }
+
+    // Initialize charts on load
+    document.addEventListener('DOMContentLoaded', () => {
+      initCharts();
+    });
+
+    // Real-time Telemetry Polling
+    async function refreshLiveTelemetry() {
+      try {
+        const res = await fetch('/api/admin/telemetry');
+        const data = await res.json();
+        
+        document.getElementById('healthVal').innerText = data.health_score + '%';
+        document.getElementById('latencyVal').innerText = data.latency_ms + ' ms';
+        
+        document.getElementById('cpuText').innerText = data.cpu_percent + '%';
+        document.getElementById('cpuFill').style.width = data.cpu_percent + '%';
+
+        document.getElementById('ramText').innerText = `${data.ram_used_gb} GB / ${data.ram_total_gb} GB (${data.ram_percent}%)`;
+        document.getElementById('ramFill').style.width = data.ram_percent + '%';
+
+        document.getElementById('diskText').innerText = `${data.disk_used_gb} GB / ${data.disk_total_gb} GB (${data.disk_percent}%)`;
+        document.getElementById('diskFill').style.width = data.disk_percent + '%';
+      } catch (err) {
+        console.error("Telemetry error:", err);
+      }
+    }
+
+    // AI Copilot Chat Form
+    async function handleCopilotSubmit(e) {
+      e.preventDefault();
+      const input = document.getElementById('copilotInput');
+      const msg = input.value.trim();
+      if (!msg) return;
+
+      appendUserMsg(msg);
+      input.value = '';
+
+      try {
+        const res = await fetch('/api/admin/copilot/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: msg })
+        });
+        const data = await res.json();
+        appendBotMsg(data.reply);
+      } catch (err) {
+        appendBotMsg('⚠️ Error processing command: ' + err);
+      }
+    }
+
+    function sendPrompt(text) {
+      document.getElementById('copilotInput').value = text;
+      document.getElementById('copilotInput').focus();
+    }
+
+    function appendUserMsg(text) {
+      const box = document.getElementById('copilotMsgBox');
+      const div = document.createElement('div');
+      div.className = 'msg-user';
+      div.innerHTML = `<div class="user-text">${text}</div>`;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function appendBotMsg(text) {
+      const box = document.getElementById('copilotMsgBox');
+      const div = document.createElement('div');
+      div.className = 'msg-bot';
+      // Simple markdown bold/code replace
+      let formatted = text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>').replace(/`(.*?)`/g, '<code>$1</code>').replace(/\n/g, '<br>');
+      div.innerHTML = `<span class="bot-icon">🤖</span><div class="bot-text">${formatted}</div>`;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    // Vulnerability Scan
+    async function triggerVulnScan() {
+      try {
+        const res = await fetch('/api/admin/scan-vulnerabilities', { method: 'POST' });
+        const data = await res.json();
+        document.getElementById('vulnScore').innerText = `${data.risk_score} / 100 (AUDITED)`;
+        document.getElementById('vulnTimestamp').innerText = data.timestamp;
+        alert(`🛡️ Vulnerability Audit Complete! Security Rating: ${data.risk_score}/100`);
+      } catch (err) {
+        alert('Scan error: ' + err);
+      }
+    }
+
+    // Backup Functions
+    async function createInstantBackup() {
+      try {
+        const res = await fetch('/api/admin/backup', { method: 'POST' });
+        const data = await res.json();
+        alert(data.message);
+        location.reload();
+      } catch (err) {
+        alert('Backup error: ' + err);
+      }
+    }
+
+    async function restoreBackupFile(filename) {
+      if (!confirm(`Are you sure you want to restore system state from snapshot: ${filename}?`)) return;
+      try {
+        const res = await fetch('/api/admin/restore-backup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: filename })
+        });
+        const data = await res.json();
+        alert(data.message);
+        location.reload();
+      } catch (err) {
+        alert('Restore error: ' + err);
+      }
+    }
+
+    async function optimizeDbStorage() {
+      try {
+        const res = await fetch('/api/admin/optimize-db', { method: 'POST' });
+        const data = await res.json();
+        alert(data.message);
+        location.reload();
+      } catch (err) {
+        alert('Optimize error: ' + err);
+      }
+    }
+
+    // RBAC Functions
+    async function updateUserRole(email, role) {
+      try {
+        const res = await fetch('/api/admin/users/update-role', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email, role: role })
+        });
+        const data = await res.json();
+        alert(data.message);
+      } catch (err) {
+        alert('Update error: ' + err);
+      }
+    }
+
+    async function editUserAccount(email, currentName) {
+      const name = prompt('New display name:', currentName);
+      if (name === null) return;
+      const password = prompt('New password (leave blank to keep current):');
+      if (password === null) return;
+      try {
+        const res = await fetch('/api/admin/users/update-account', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email, name: name, password: password })
+        });
+        const data = await res.json();
+        alert(data.message || data.error);
+        if (data.success) location.reload();
+      } catch (err) {
+        alert('Account update error: ' + err);
+      }
+    }
+
+    async function toggleUserStatus(email) {
+      try {
+        const res = await fetch('/api/admin/users/toggle-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email })
+        });
+        const data = await res.json();
+        alert(data.message);
+        location.reload();
+      } catch (err) {
+        alert('Status error: ' + err);
+      }
+    }
+
+    // Under Attack Mode Toggle
+    async function toggleUnderAttackMode() {
+      try {
+        const res = await fetch('/api/admin/toggle-under-attack-mode', { method: 'POST' });
+        const data = await res.json();
+        alert(data.message);
+        location.reload();
+      } catch (err) {
+        alert('Toggle error: ' + err);
+      }
+    }
+
+    // Self Healing Routine
+    async function runSelfHealingMaintenance() {
+      try {
+        const res = await fetch('/api/admin/run-maintenance', { method: 'POST' });
+        const data = await res.json();
+        alert(`⚡ ${data.message}`);
+      } catch (err) {
+        alert('Maintenance error: ' + err);
+      }
+    }
+
+    // Toggle Block IP
+    async function toggleBlockIp(ip) {
+      if (!confirm(`Toggle block status for IP: ${ip}?`)) return;
+      try {
+        const res = await fetch('/api/admin/block-ip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip: ip })
+        });
+        const data = await res.json();
+        alert(data.message);
+        location.reload();
+      } catch (err) {
+        alert('Error: ' + err);
+      }
+    }
+
+    async function handleManualBlock(e) {
+      e.preventDefault();
+      const ip = document.getElementById('manualIpInput').value.trim();
+      if (!ip) return;
+      await toggleBlockIp(ip);
+    }
+
+    async function simulateAttack(attackType) {
+      try {
+        const res = await fetch('/api/admin/simulate-attack', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: attackType })
+        });
+        const data = await res.json();
+        alert(`🚨 ${data.message}`);
+        location.reload();
+      } catch (err) {
+        alert('Simulation error: ' + err);
+      }
+    }
+
+    function filterLogs(category) {
+      document.querySelectorAll('.btn-filter').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+
+      const rows = document.querySelectorAll('#auditTable tbody tr.log-row');
+      rows.forEach(row => {
+        if (category === 'ALL') {
+          row.style.display = '';
+        } else if (category === 'ATTACK') {
+          row.style.display = row.dataset.type === 'ATTACK' ? '' : 'none';
+        } else if (category === 'VISIT') {
+          row.style.display = row.dataset.type === 'VISIT' ? '' : 'none';
+        }
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Portal Login — ScamCheck AI</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body class="auth-page">
+<div class="auth-container">
+  <div class="auth-card">
+    <div class="auth-header">
+      <svg class="logo-svg auth-logo-svg admin-logo-svg" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="shieldGradAL" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#60a5fa"/>
+            <stop offset="50%" stop-color="#3b82f6"/>
+            <stop offset="100%" stop-color="#2563eb"/>
+          </linearGradient>
+          <linearGradient id="checkGradAL" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#ffffff"/>
+            <stop offset="100%" stop-color="#dbeafe"/>
+          </linearGradient>
+          <radialGradient id="innerGlowAL" cx="50%" cy="40%" r="50%">
+            <stop offset="0%" stop-color="#93c5fd" stop-opacity="0.6"/>
+            <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+          </radialGradient>
+          <filter id="softGlowAL" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="0.8" result="blur"/>
+            <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+          </filter>
+        </defs>
+        <g filter="url(#softGlowAL)">
+          <path d="M32 3 L55 12 C55 12 58 38 32 61 C6 38 9 12 9 12 Z"
+                fill="url(#shieldGradAL)" stroke="#93c5fd" stroke-width="1"/>
+          <path d="M32 7 L51 15 C51 15 54 37 32 57 C10 37 13 15 13 15 Z"
+                fill="url(#innerGlowAL)"/>
+          <path d="M20 30 L28 40 L46 20"
+                fill="none" stroke="url(#checkGradAL)" stroke-width="4.5"
+                stroke-linecap="round" stroke-linejoin="round"/>
+          <g stroke="#bfdbfe" stroke-width="1.2" stroke-linecap="round" fill="none" opacity="0.7">
+            <circle cx="40" cy="18" r="1.5" fill="#bfdbfe"/>
+            <circle cx="15" cy="24" r="1.2" fill="#bfdbfe"/>
+            <path d="M40 18 L40 24 L46 24"/>
+            <path d="M15 24 L15 29 L20 29"/>
+            <circle cx="22" cy="48" r="1.2" fill="#bfdbfe"/>
+            <path d="M22 48 L22 44 L26 44"/>
+          </g>
+        </g>
+      </svg>
+      <h1>Admin <span class="brand-ai">Console</span></h1>
+      <p>Security & Threat Monitoring Portal</p>
+    </div>
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <div class="flash-msg">{{ messages[0] }}</div>
+    {% endif %}
+    {% endwith %}
+
+    <form method="POST" class="auth-form">
+      <div class="auth-field">
+        <label>Admin Email</label>
+        <input type="email" name="email" placeholder="admin@scamcheck.ai" required>
+      </div>
+      <div class="auth-field">
+        <label>Password</label>
+        <input type="password" name="password" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="auth-submit">Enter Security Center</button>
+    </form>
+
+    <p class="auth-link"><a href="/forgot-password">Forgot a user account password?</a></p>
+    <p class="auth-link auth-back-link"><a href="/">← Back to Landing Page</a></p>
+  </div>
+</div>
+</body>
+</html>

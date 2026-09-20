@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ScamCheck AI — AI-Powered Fraud, Phishing & Fake Receipt Detector</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body class="landing-body">
+  
+  <!-- ══════════════════════════════
+       STICKY NAVBAR
+       ══════════════════════════════ -->
+  <header class="landing-nav-wrap">
+    <nav class="landing-nav">
+      <a href="/" class="brand">
+        <svg class="logo-svg" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#60a5fa"/>
+              <stop offset="50%" stop-color="#3b82f6"/>
+              <stop offset="100%" stop-color="#2563eb"/>
+            </linearGradient>
+            <linearGradient id="checkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="100%" stop-color="#dbeafe"/>
+            </linearGradient>
+            <radialGradient id="innerGlow" cx="50%" cy="40%" r="50%">
+              <stop offset="0%" stop-color="#93c5fd" stop-opacity="0.6"/>
+              <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+            </radialGradient>
+            <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="0.8" result="blur"/>
+              <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+            </filter>
+          </defs>
+          <g filter="url(#softGlow)">
+            <path d="M32 3 L55 12 C55 12 58 38 32 61 C6 38 9 12 9 12 Z"
+                  fill="url(#shieldGrad)" stroke="#93c5fd" stroke-width="1"/>
+            <path d="M32 7 L51 15 C51 15 54 37 32 57 C10 37 13 15 13 15 Z"
+                  fill="url(#innerGlow)"/>
+            <path d="M20 30 L28 40 L46 20"
+                  fill="none" stroke="url(#checkGrad)" stroke-width="4.5"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+            <g stroke="#bfdbfe" stroke-width="1.2" stroke-linecap="round" fill="none" opacity="0.7">
+              <circle cx="40" cy="18" r="1.5" fill="#bfdbfe"/>
+              <circle cx="15" cy="24" r="1.2" fill="#bfdbfe"/>
+              <path d="M40 18 L40 24 L46 24"/>
+              <path d="M15 24 L15 29 L20 29"/>
+              <circle cx="22" cy="48" r="1.2" fill="#bfdbfe"/>
+              <path d="M22 48 L22 44 L26 44"/>
+            </g>
+          </g>
+        </svg>
+        <span class="brand-text">ScamCheck <span class="brand-ai">AI</span></span>
+      </a>
+
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#security">Security</a>
+        <a href="#faq">FAQ</a>
+      
+      </div>
+
+      <div class="nav-actions">
+        {% if is_logged_in %}
+          <a href="/app" class="btn-cta-primary">Go to Dashboard →</a>
+          <a href="/logout" class="btn-cta-ghost">Logout</a>
+        {% else %}
+          <a href="/login" class="btn-cta-ghost">Sign In</a>
+          <a href="/register" class="btn-cta-primary">Sign up</a>
+        {% endif %}
+      </div>
+    </nav>
+  </header>
+
+  <section class="landing-hero">
+    <div class="hero-glow hero-glow-1"></div>
+    <div class="hero-glow hero-glow-2"></div>
+
+    <div class="hero-container">
+    
+      <div class="hero-badge">
+        <span class="pulse-dot"></span>
+        <span>Next-Gen Scam & Fake Receipt Detection</span>
+      </div>
+
+      <h1 class="hero-title">
+        Never fall for <span class="gradient-text">online scams</span> or <span class="gradient-text-alt">fake receipts</span> again.
+      </h1>
+
+      <p class="hero-subtitle">
+        ScamCheck AI instantly analyzes suspicious SMS, phishing links, GCash/Maya payment receipts, and fake news articles using high-precision AI forensics.
+      </p>
+
+      <!-- ══ SOCIAL LOGIN QUICK ACTIONS ══ -->
+      
+
+      <!-- ══ PREVIEW / MOCK SCANNER CARD ══ -->
+      <div class="hero-preview-card">
+        <div class="preview-header">
+          <div class="preview-dots">  
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+          </div>
+          
+            </div>
+            <div class="result-breakdown-mock">
+              <div class="progress-item">
+                <div class="progress-info"><span>Phishing Likelihood</span><b>98%</b></div>
+                <div class="progress-bar"><div class="fill danger" style="width: 98%"></div></div>
+              </div>
+              <div class="progress-item">
+                <div class="progress-info"><span>Receipt / Proof Integrity</span><b>100% Secure</b></div>
+                <div class="progress-bar"><div class="fill safe" style="width: 100%"></div></div>
+              </div>
+            </div>
+            <div class="preview-cta">
+              <a href="/app" class="btn-test-now">Test Your Own Text / Receipt Now →</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ TRUST STATS ══ -->
+      <div class="hero-stats">
+        <div class="stat-card">
+          <span class="stat-number">99.4%</span>
+          <span class="stat-desc">Fraud Detection Accuracy</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-number">50,000+</span>
+          <span class="stat-desc">Messages & Receipts Scanned</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-number">0.3s</span>
+          <span class="stat-desc">Ultra-Fast Analysis Time</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-number">100%</span>
+          <span class="stat-desc">Private & Locally Analyzed</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════
+       CORE FEATURES
+       ══════════════════════════════ -->
+  <section id="features" class="landing-section">
+    <div class="section-container">
+      <div class="section-headline">
+        <span class="eyebrow">ALL-IN-ONE DEFENSE</span>
+        <h2>Powerful AI Forensics for Everyday Filipinos & Businesses</h2>
+        <p>Protect your money, personal data, and peace of mind against cybercrime and social engineering.</p>
+      </div>
+
+      <div class="features-grid">
+        <!-- Feature 1 -->
+        <div class="feature-box">
+          <div class="feature-icon">🔎</div>
+          <h3>Phishing & Scam SMS Scanner</h3>
+          <p>Catches fake parcel notifications, lottery traps, urgent bank OTP requests, and suspicious shortened URLs (bit.ly, tinyurl) before you click.</p>
+          <ul class="feature-bullets">
+            <li>✓ Social engineering & urgency pattern detection</li>
+            <li>✓ Suspicious top-level domain checks (.zip, .click, etc.)</li>
+            <li>✓ Actionable safety recommendations</li>
+          </ul>
+        </div>
+
+        <!-- Feature 2 -->
+        <div class="feature-box highlight-box">
+          <div class="feature-icon">🧾</div>
+          <h3>GCash & Maya Receipt Forensics</h3>
+          <p>Uses OCR text extraction and algorithmic validation to identify fake, tampered, or photoshopped transaction receipts from online buyers and sellers.</p>
+          <ul class="feature-bullets">
+            <li>✓ Reference number format & timestamp validation</li>
+            <li>✓ Missing official footer & fee detection</li>
+            <li>✓ Detects copied fonts & altered balances</li>
+          </ul>
+        </div>
+
+        <!-- Feature 3 -->
+        <div class="feature-box">
+          <div class="feature-icon">📰</div>
+          <h3>News Article & Credibility Checker</h3>
+          <p>Evaluates news claims and viral social media posts for clickbait rhetoric, missing author attribution, unverified claims, and sensationalism.</p>
+          <ul class="feature-bullets">
+            <li>✓ Sensationalist / clickbait score rating</li>
+            <li>✓ Source credibility & citation verification</li>
+            <li>✓ Reading level & structured breakdown</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════
+       HOW IT WORKS
+       ══════════════════════════════ -->
+  <section id="how-it-works" class="landing-section alt-bg">
+    <div class="section-container">
+      <div class="section-headline">
+        <span class="eyebrow">SIMPLE 3-STEP PROCESS</span>
+        <h2>How ScamCheck AI Keeps You Safe</h2>
+        <p>No complicated setup. Analyze suspicious texts and screenshots in just seconds.</p>
+      </div>
+
+      <div class="steps-grid">
+        <div class="step-card">
+          <div class="step-badge">1</div>
+          <h3>Paste or Upload</h3>
+          <p>Copy and paste any suspicious text message, email, article URL, or upload a screenshot of a GCash/Maya transfer receipt.</p>
+        </div>
+
+        <div class="step-card">
+          <div class="step-badge">2</div>
+          <h3>AI Forensic Scan</h3>
+          <p>Our hybrid system runs regex validation, OCR parsing, linguistic urgency heuristics, and domain verification simultaneously.</p>
+        </div>
+
+        <div class="step-card">
+          <div class="step-badge">3</div>
+          <h3>Instant Safety Score</h3>
+          <p>Receive a clear 0-100 Risk Score, detailed warning signals, and step-by-step advice on whether to block, report, or proceed.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════
+       SECURITY & PRIVACY
+       ══════════════════════════════ -->
+  <section id="security" class="landing-section">
+    <div class="section-container">
+      <div class="security-card">
+        <div class="security-text">
+          <span class="eyebrow">PRIVACY-FIRST ARCHITECTURE</span>
+          <h2>Your Data Stays Safe & Confidential</h2>
+          <p>We do not sell your personal data or store sensitive credentials. All uploaded receipts and scanned messages are parsed securely in session memory.</p>
+          <div class="security-badges">
+            <div class="badge-item">🛡️ Encrypted Sessions</div>
+            <div class="badge-item">🔒 Zero Data Selling</div>
+            <div class="badge-item">⚡ 100% Instant Analysis</div>
+          </div>
+        </div>
+        <div class="security-visual">
+          <div class="lock-shield">🛡️</div>
+          <span class="secure-tag">End-to-End Verified</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════
+       FAQ SECTION
+       ══════════════════════════════ -->
+  <section id="faq" class="landing-section alt-bg">
+    <div class="section-container max-w-750">
+      <div class="section-headline">
+        <span class="eyebrow">COMMON QUESTIONS</span>
+        <h2>Frequently Asked Questions</h2>
+      </div>
+
+      <div class="faq-list">
+        <div class="faq-item">
+          <h4>How does the GCash/Maya receipt checker work?</h4>
+          <p>We use Windows Native OCR & Tesseract to read reference numbers, amounts, dates, and platform keywords from receipt screenshots, cross-referencing them against known fraud patterns.</p>
+        </div>
+        <div class="faq-item">
+          <h4>Can I log in using Google, Facebook, or GitHub?</h4>
+          <p>Yes! We support 1-click social sign-in with Google, Facebook, and GitHub so you can start scanning immediately without remembering another password.</p>
+        </div>
+        <div class="faq-item">
+          <h4>Is ScamCheck AI free to use?</h4>
+          <p>Yes, ScamCheck AI is free for individual users to scan suspicious messages, verify payment receipts, and evaluate news articles.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════
+       CALL TO ACTION
+       ══════════════════════════════ -->
+  <section class="landing-cta-banner">
+    <div class="cta-glow"></div>
+    <div class="cta-content">
+      <h2>Start Protecting Your Transactions Today</h2>
+      <p>Join thousands of users who verify suspicious messages and fake receipts before taking risks.</p>
+     
+          <span></span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════
+       FOOTER
+       ══════════════════════════════ -->
+  <footer class="landing-footer">
+    <div class="footer-container">
+      <div class="footer-brand">
+        <svg class="logo-svg footer-logo-svg" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="shieldGradF" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#60a5fa"/>
+              <stop offset="50%" stop-color="#3b82f6"/>
+              <stop offset="100%" stop-color="#2563eb"/>
+            </linearGradient>
+            <linearGradient id="checkGradF" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="100%" stop-color="#dbeafe"/>
+            </linearGradient>
+            <radialGradient id="innerGlowF" cx="50%" cy="40%" r="50%">
+              <stop offset="0%" stop-color="#93c5fd" stop-opacity="0.6"/>
+              <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <path d="M32 3 L55 12 C55 12 58 38 32 61 C6 38 9 12 9 12 Z"
+                fill="url(#shieldGradF)" stroke="#93c5fd" stroke-width="1"/>
+          <path d="M32 7 L51 15 C51 15 54 37 32 57 C10 37 13 15 13 15 Z"
+                fill="url(#innerGlowF)"/>
+          <path d="M20 30 L28 40 L46 20"
+                fill="none" stroke="url(#checkGradF)" stroke-width="4.5"
+                stroke-linecap="round" stroke-linejoin="round"/>
+          <g stroke="#bfdbfe" stroke-width="1.2" stroke-linecap="round" fill="none" opacity="0.7">
+            <circle cx="40" cy="18" r="1.5" fill="#bfdbfe"/>
+            <circle cx="15" cy="24" r="1.2" fill="#bfdbfe"/>
+            <path d="M40 18 L40 24 L46 24"/>
+            <path d="M15 24 L15 29 L20 29"/>
+            <circle cx="22" cy="48" r="1.2" fill="#bfdbfe"/>
+            <path d="M22 48 L22 44 L26 44"/>
+          </g>
+        </svg>
+        <span class="brand-text">ScamCheck <span class="brand-ai">AI</span></span>
+        <p>Empowering users with automated fraud defense and receipt verification.</p>
+      </div>
+      <div class="footer-copy">
+        &copy; 2026 ScamCheck AI. All rights reserved. Built for security & peace of mind.
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>

@@ -1,0 +1,33 @@
+Flask>=3.0
+python-dotenv>=1.0
+requests>=2.31
+Pillow>=10.0
+pytesseract>=0.3.10
+winocr>=0.0.15; sys_platform == 'win32'
+
+# ==========================================
+# PAANO I-RUN ANG APP NA ITO SA VSCODE TERMINAL:
+# ==========================================
+# Sundin ang mga steps na ito (i-type sa terminal ng VSCode at i-press ang Enter):
+#
+# STEP 1: Gumawa ng virtual environment (isang beses lang ito gagawin)
+# python -m venv venv
+#
+# STEP 2: I-activate ang virtual environment
+# venv\Scripts\activate
+#
+# STEP 3: I-install ang mga requirements (kailangan i-run kung may bagong package)
+# pip install -r requirements.txt
+#
+# STEP 4: I-run ang Flask application
+# python app.py
+#
+# ==========================================
+# MAHALAGANG PAALALA PARA SA RECEIPT CHECKER (TESSERACT OCR):
+# ==========================================
+# Para gumana ang pagbasa ng AI sa mga picture ng resibo, kailangan ninyong i-install 
+# mismo ang Tesseract software sa inyong Windows laptop/PC:
+# 
+# 1. I-download ang installer dito: https://github.com/UB-Mannheim/tesseract/wiki
+# 2. I-install ito. 
+# 3. Kung hindi nababasa ng app ang resibo, baka kailangan ninyong ilagay ang Tesseract sa System PATH.
