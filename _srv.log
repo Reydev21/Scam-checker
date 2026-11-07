@@ -1,0 +1,87 @@
+Windows OCR is only installed in .\venv - restarting the app with it.
+ScamCheck AI storage backend: Supabase
+Receipt OCR engine: Windows OCR (winocr) is ready
+Social login ready: Google
+ * Serving Flask app 'app'
+ * Debug mode: off
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on http://127.0.0.1:5000
+Press CTRL+C to quit
+127.0.0.1 - - [06/Nov/2026 22:03:46] "GET /login HTTP/1.1" 200 -
+[2026-11-06 22:18:54,677] ERROR in app: Supabase GET request failed for blocked_ips
+Traceback (most recent call last):
+  File "C:\Users\Reynielle\OneDrive\Desktop\scam_checker_app\venv\Lib\site-packages\urllib3\connectionpool.py", line 540, in _make_request
+    response = conn.getresponse()
+  File "C:\Users\Reynielle\OneDrive\Desktop\scam_checker_app\venv\Lib\site-packages\urllib3\connection.py", line 638, in getresponse
+    httplib_response = super().getresponse()
+  File "C:\Users\Reynielle\AppData\Local\Python\pythoncore-3.14-64\Lib\http\client.py", line 1478, in getresponse
+    response.begin()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\Reynielle\AppData\Local\Python\pythoncore-3.14-64\Lib\http\client.py", line 343, in begin
+    version, status, reason = self._read_status()
+                              ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Reynielle\AppData\Local\Python\pythoncore-3.14-64\Lib\http\client.py", line 304, in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+               ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "C:\Users\Reynielle\AppData\Local\Python\pythoncore-3.14-64\Lib\socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+  File "C:\Users\Reynielle\AppData\Local\Python\pythoncore-3.14-64\Lib\ssl.py", line 1304, in recv_into
+    return self.read(nbytes, buffer)
+           ~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\Reynielle\AppData\Local\Python\pythoncore-3.14-64\Lib\ssl.py", line 1138, in read
+    return self._sslobj.read(len, buffer)
+           ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+TimeoutError: The read operation timed out
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Reynielle\OneDrive\Desktop\scam_checker_app\venv\Lib\site-packages\requests\adapters.py", line 696, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "C:\Users\Reynielle\OneDrive\Desktop\scam_checker_app\venv\Lib\site-packages\urllib3\connectionpool.py", line 847, in urlopen
+    retries = retries.increment(
+        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
+    )
+  File "C:\Users\Reynielle\OneDrive\Desktop\scam_checker_app\venv\Lib\site-packages\urllib3\util\retry.py", line 510, in increment
+    raise reraise(type(error), error, _stacktrace)
+          ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Reynielle\OneDrive\Desktop\scam_checker_app\venv\Lib\site-packages\urllib3\util\util.py", line 39, in reraise
+    raise value
+  File "C:\Users\Reynielle\OneDrive\Desktop\scam_checker_app\venv\Lib\site-packages\urllib3\connectionpool.py", line 793, in urlopen
+    response = self._make_request(
+        conn,
+    ...<10 lines>...
+        **response_kw,
+    )
+  File "C:\Users\Reynielle\OneDrive\Desktop\scam_checker_app\venv\Lib\site-packages\urllib3\connectionpool.py", line 542, in _make_request
+    self._raise_timeout(err=e, url=url, timeout_value=read_timeout)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Reynielle\OneDrive\Desktop\scam_checker_app\venv\Lib\site-packages\urllib3\connectionpool.py", line 373, in _raise_timeout
+    raise ReadTimeoutError(
+        self, url, f"Read timed out. (read timeout={timeout_value})"
+    ) from err
+urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='ontljnfmwfpfrtjmtycm.supabase.co', port=443): Read timed out. (read timeout=4)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Reynielle\OneDrive\Desktop\scam_checker_app\app.py", line 156, in _supabase_request
+    response = _SUPABASE_SESSION.request(
+        method, url, headers=headers, json=payload, timeout=timeout or (5, 15)
+    )
+  File "C:\Users\Reynielle\OneDrive\Desktop\scam_checker_app\venv\Lib\site-packages\requests\sessions.py", line 651, in request
+    resp = self.send(prep, **send_kwargs)
+  File "C:\Users\Reynielle\OneDrive\Desktop\scam_checker_app\venv\Lib\site-packages\requests\sessions.py", line 784, in send
+    r = adapter.send(request, **kwargs)
+  File "C:\Users\Reynielle\OneDrive\Desktop\scam_checker_app\venv\Lib\site-packages\requests\adapters.py", line 742, in send
+    raise ReadTimeout(e, request=request)
+requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='ontljnfmwfpfrtjmtycm.supabase.co', port=443): Read timed out. (read timeout=4)
+[2026-11-06 22:18:57,371] WARNING in app: Google credential POST arrived without a sign-in nonce in this session.
+127.0.0.1 - - [06/Nov/2026 22:18:57] "POST /auth/google/credential HTTP/1.1" 400 -
+[2026-11-06 22:18:58,080] WARNING in app: Google returned no credential: origin_mismatch The origin is not in the authorized JavaScript origins
+127.0.0.1 - - [06/Nov/2026 22:18:58] "POST /auth/google/credential HTTP/1.1" 400 -

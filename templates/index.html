@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+  {% include "icons_sprite.svg" %}
 <div class="app-layout">
   <!-- ═══ SIDEBAR ═══ -->
   <aside class="sidebar">
@@ -55,7 +56,7 @@
       <nav class="side-nav">
      
         <a href="#checker" class="active"><span></span> Scanner</a>
-        <a href="#how"><span>ℹ️</span> How it works</a>
+        <a href="#how"><span><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg></span> How it works</a>
       
       </nav>
     </div>
@@ -69,7 +70,7 @@
           <span>{{ user.email }}</span>
         </div>
       </div>
-      <a href="/logout" class="logout-btn">🚪 Logout</a>
+      <a href="/logout" class="logout-btn"><svg class="ic" aria-hidden="true"><use href="#i-logout"/></svg> Logout</a>
     </div>
   </aside>
 
@@ -103,7 +104,7 @@
         </svg>
         <span class="brand-text">ScamCheck <span class="brand-ai">AI</span></span>
       </a>
-      <a href="/logout" class="mobile-logout">Logout</a>
+      <a href="/logout" class="mobile-logout"><svg class="ic" aria-hidden="true"><use href="#i-logout"/></svg> Logout</a>
     </header>
     <main class="main-content">
 
@@ -116,13 +117,13 @@
 
   <div class="tabs">
     <button class="tab active" data-mode="message">
-      <span>🔎</span> Scam Scanner
+      <span><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg></span> Scam Scanner
     </button>
     <button class="tab" data-mode="article">
-      <span>📰</span> Article Checker
+      <span><svg class="ic" aria-hidden="true"><use href="#i-news"/></svg></span> Article Checker
     </button>
     <button class="tab" data-mode="receipt">
-      <span>🧾</span> Receipt Checker
+      <span><svg class="ic" aria-hidden="true"><use href="#i-receipt"/></svg></span> Receipt Checker
     </button>
   </div>
 
@@ -135,7 +136,7 @@
           <p class="card-sub">Paste text or provide an image for instant AI analysis</p>
         </div>
       </div>
-      <span class="privacy-badge">🔒 Processed locally</span>
+      <span class="privacy-badge"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg> Processed locally</span>
     </div>
 
     <form id="checkerForm">
@@ -144,28 +145,15 @@
       <!-- Article Fields -->
       <div id="articleFields" class="article-fields hidden">
         <div class="field">
-          <label>Article title</label>
-          <input id="title" name="title" placeholder="Paste the article headline">
-        </div>
-        <div class="grid2">
-          <div class="field">
-            <label>Author</label>
-            <input id="author" name="author" placeholder="Optional">
-          </div>
-          <div class="field">
-            <label>Publication date</label>
-            <input id="pub_date" name="pub_date" placeholder="Optional">
-          </div>
-        </div>
-        <div class="field">
-          <label>Source URL</label>
+          <label>Article link</label>
           <input id="source_url" name="source_url" type="url" placeholder="https://example.com/article">
+          <small class="field-help">Paste a link or upload an article screenshot below.</small>
         </div>
       </div>
 
       <!-- Receipt Tip Banner -->
       <div id="receiptTip" class="receipt-tip hidden">
-        <div class="tip-icon">🧾</div>
+        <div class="tip-icon"><svg class="ic" aria-hidden="true"><use href="#i-receipt"/></svg></div>
         <div>
           <b>How to use Receipt Checker</b>
           <p>Upload or take a photo of a <strong>GCash, Maya, BPI, BDO, UnionBank, ShopeePay</strong>, or any e-wallet/bank receipt screenshot.</p>
@@ -177,10 +165,10 @@
         <img id="preview" alt="Selected image preview">
         <div class="preview-info">
           <div class="preview-meta">
-            <span class="preview-icon">🖼️</span>
+            <span class="preview-icon"><svg class="ic" aria-hidden="true"><use href="#i-image"/></svg></span>
             <b id="fileName"></b>
           </div>
-          <button type="button" id="removeImage" class="remove-btn">✕ Remove</button>
+          <button type="button" id="removeImage" class="remove-btn"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg> Remove</button>
         </div>
       </div>
 
@@ -193,19 +181,19 @@
           </button>
           <div id="uploadMenu" class="upload-menu hidden">
             <button type="button" id="browseBtn" class="menu-item">
-              <span>📁</span> Upload Image
+              <span><svg class="ic" aria-hidden="true"><use href="#i-upload"/></svg></span> Upload Image
             </button>
             <button type="button" id="cameraBtn" class="menu-item">
-              <span>📷</span> Take Photo
+              <span><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg></span> Take Photo
             </button>
           </div>
         </div>
         <input type="text" id="text" name="text" class="chat-input" placeholder="Type a message or attach a receipt..." autocomplete="off">
-        <button class="chat-btn send-btn" id="scanBtn" type="submit" title="Analyze">
+        <button class="chat-btn send-btn" id="scanBtn" type="submit" title="Analyze" aria-label="Analyze">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         </button>
       </div>
-      <div id="status" class="status"></div>
+      <div id="status" class="status quiet"><svg class="ic" aria-hidden="true"><use id="statusIconRef" href="#i-info"/></svg><span id="statusText"></span></div>
     </form>
   </div>
 </section>
@@ -237,25 +225,57 @@
       <b id="verdictText">—</b>
     </div>
   </div>
+  <div id="forensicsPanel" class="receipt-verdict hidden">
+    <div class="verdict-platform">
+      <span class="verdict-label">Image Forensics</span>
+      <b id="forensicsVerdict">—</b>
+    </div>
+    <div class="verdict-result">
+      <span class="verdict-label">Tampering Score</span>
+      <b id="forensicsScore">—</b>
+    </div>
+    <div class="verdict-result">
+      <span class="verdict-label">Canvas</span>
+      <b id="forensicsCanvas">—</b>
+    </div>
+  </div>
+  <div id="sourcePanel" class="receipt-verdict hidden">
+    <div class="verdict-platform">
+      <span class="verdict-label">Real Publisher</span>
+      <b id="sourcePublisher">—</b>
+    </div>
+    <div class="verdict-result">
+      <span class="verdict-label">Domain Owned By</span>
+      <b id="sourceOwnership">—</b>
+    </div>
+    <div class="verdict-result">
+      <span class="verdict-label">Checked Domain</span>
+      <b id="sourceDomain">—</b>
+    </div>
+    <div class="verdict-result">
+      <span class="verdict-label">Domain Age</span>
+      <b id="sourceAge">—</b>
+    </div>
+  </div>
   <div class="result-grid">
     <div class="result-section flags-section">
-      <h3>🚩 Red Flags</h3>
+      <h3><svg class="ic" aria-hidden="true"><use href="#i-flag"/></svg> Red Flags</h3>
       <ul id="flags"></ul>
     </div>
     <div class="result-section positive-section">
-      <h3>✅ Positive Signals</h3>
+      <h3><svg class="ic" aria-hidden="true"><use href="#i-check-circle"/></svg> Positive Signals</h3>
       <ul id="positive"></ul>
     </div>
   </div>
   <div class="recommendation">
-    <div class="rec-icon">💡</div>
+    <div class="rec-icon"><svg class="ic" aria-hidden="true"><use href="#i-bulb"/></svg></div>
     <div>
       <b>Recommended action</b>
       <p id="action"></p>
     </div>
   </div>
   <details class="json-details">
-    <summary>📋 Structured JSON response</summary>
+    <summary><svg class="ic" aria-hidden="true"><use href="#i-clipboard"/></svg> Structured JSON response</summary>
     <pre id="json"></pre>
   </details>
 </section>
@@ -267,28 +287,28 @@
   <div class="flow-grid">
     <div class="flow-item">
       <div class="flow-num">1</div>
-      <div class="flow-icon">📥</div>
+      <div class="flow-icon"><svg class="ic" aria-hidden="true"><use href="#i-inbox"/></svg></div>
       <b>User Input</b>
       <p>Text, receipt image, screenshot, or live camera capture</p>
     </div>
     <div class="flow-arrow">→</div>
     <div class="flow-item">
       <div class="flow-num">2</div>
-      <div class="flow-icon">🔬</div>
+      <div class="flow-icon"><svg class="ic" aria-hidden="true"><use href="#i-scan"/></svg></div>
       <b>Multimodal Processing</b>
       <p>OCR, text patterns, URLs and article signals</p>
     </div>
     <div class="flow-arrow">→</div>
     <div class="flow-item">
       <div class="flow-num">3</div>
-      <div class="flow-icon">⚙️</div>
+      <div class="flow-icon"><svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg></div>
       <b>System Rules</b>
       <p>Urgency, phishing, clickbait, attribution and source signals</p>
     </div>
     <div class="flow-arrow">→</div>
     <div class="flow-item">
       <div class="flow-num">4</div>
-      <div class="flow-icon">📊</div>
+      <div class="flow-icon"><svg class="ic" aria-hidden="true"><use href="#i-chart"/></svg></div>
       <b>Risk Output</b>
       <p>Score, flags, recommendation and structured JSON</p>
     </div>
@@ -325,13 +345,13 @@
   <div class="modal-box">
     <div class="modal-header">
       <div class="modal-title">
-        <span class="modal-icon">📷</span>
+        <span class="modal-icon"><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg></span>
         <div>
           <h3>Take a Photo</h3>
           <p>Position the text or image you want to scan</p>
         </div>
       </div>
-      <button type="button" id="closeCamera" class="modal-close" aria-label="Close camera">✕</button>
+      <button type="button" id="closeCamera" class="modal-close" aria-label="Close camera"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
     </div>
     <div class="camera-viewport">
       <video id="cameraFeed" autoplay playsinline muted></video>
@@ -342,15 +362,15 @@
       </div>
     </div>
     <div id="cameraError" class="camera-error hidden">
-      <span>⚠️</span>
+      <span><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg></span>
       <p id="cameraErrorMsg">Camera not available.</p>
     </div>
     <div class="modal-controls">
-      <button type="button" id="switchCamera" class="ctrl-btn switch-btn" title="Switch camera">🔄 Switch</button>
+      <button type="button" id="switchCamera" class="ctrl-btn switch-btn" title="Switch camera"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg> Switch</button>
       <button type="button" id="snapBtn" class="ctrl-btn snap-btn" aria-label="Take photo">
         <span class="shutter-ring"><span class="shutter-inner"></span></span>
       </button>
-      <button type="button" id="cancelCamera" class="ctrl-btn cancel-btn">✕ Cancel</button>
+      <button type="button" id="cancelCamera" class="ctrl-btn cancel-btn"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg> Cancel</button>
     </div>
   </div>
 </div>

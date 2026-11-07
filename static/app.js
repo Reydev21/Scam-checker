@@ -16,10 +16,13 @@ const previewImg    = document.getElementById("preview");
 const fileNameEl    = document.getElementById("fileName");
 const removeImageBtn= document.getElementById("removeImage");
 const statusEl      = document.getElementById("status");
+const statusText    = document.getElementById("statusText");
+const statusIconRef = document.getElementById("statusIconRef");
 const resultSection = document.getElementById("result");
 const scanBtn       = document.getElementById("scanBtn");
 const browseBtn     = document.getElementById("browseBtn");
 const cameraBtn     = document.getElementById("cameraBtn");
+const articleInput  = document.getElementById("source_url");
 
 // Camera modal refs
 const cameraModal   = document.getElementById("cameraModal");
@@ -45,6 +48,7 @@ document.querySelectorAll(".tab").forEach(tab => {
     tab.classList.add("active");
 
     const mode    = tab.dataset.mode;
+    sessionStorage.setItem("scamcheck-mode", mode);
     const article = mode === "article";
     const receipt = mode === "receipt";
     modeInput.value = mode;
@@ -54,14 +58,22 @@ document.querySelectorAll(".tab").forEach(tab => {
                               : receipt ? "Scan a receipt or transaction screenshot" 
                               : "Scan a suspicious message";
     textEl.placeholder        = article
-      ? "Paste the full article text here..."
+      ? "Upload an article screenshot or paste its link above..."
       : receipt
       ? "Upload a receipt image, or paste receipt text here..."
       : "Type a message or attach a screenshot...";
+    textEl.classList.toggle("hidden", article);
     resultSection.classList.add("hidden");
-    statusEl.textContent = "";
+    showStatus("", "");
   });
 });
+
+// Keep the selected checker when the browser restores or reloads the page.
+const savedMode = sessionStorage.getItem("scamcheck-mode");
+if (savedMode && ["message", "article", "receipt"].includes(savedMode)) {
+  const savedTab = document.querySelector(`.tab[data-mode="${savedMode}"]`);
+  if (savedTab) savedTab.click();
+}
 
 // ═══════════════════════════════════════════════════
 // DRAG & DROP
@@ -113,11 +125,11 @@ imageInput.addEventListener("change", () => {
 // ═══════════════════════════════════════════════════
 function setImage(file) {
   if (!file.type.startsWith("image/")) {
-    showStatus("⚠️ Please choose a PNG, JPG, or WEBP image.", "warn");
+    showStatus("Please choose a PNG, JPG, or WEBP image.", "warn");
     return;
   }
   if (file.size > 12 * 1024 * 1024) {
-    showStatus("⚠️ Image is larger than 12 MB.", "warn");
+    showStatus("Image is larger than 12 MB.", "warn");
     return;
   }
 
@@ -130,7 +142,7 @@ function setImage(file) {
   previewImg.src = URL.createObjectURL(file);
   fileNameEl.textContent = file.name;
   previewBox.classList.remove("hidden");
-  showStatus("🖼️ Image ready — click Analyze now.", "ok");
+  showStatus("Image ready — click Analyze now.", "ok");
 }
 
 // Remove image
@@ -300,19 +312,26 @@ form.addEventListener("submit", async e => {
   e.preventDefault();
 
   const mode = modeInput.value;
-  if (!textEl.value.trim() && !imageInput.files[0]) {
-    showStatus("⚠️ Enter text or upload / snap an image first.", "warn");
+  const isArticle = mode === "article";
+  if (isArticle && !articleInput.value.trim() && !imageInput.files[0]) {
+    showStatus("Paste an article link or upload a picture first.", "warn");
+    return;
+  }
+  if (!isArticle && !textEl.value.trim() && !imageInput.files[0]) {
+    showStatus("Enter text or upload / snap an image first.", "warn");
     return;
   }
 
   const data = new FormData(form);
 
   scanBtn.disabled = true;
-  scanBtn.innerHTML = '⏳';
+  scanBtn.classList.add("is-loading");
+  scanBtn.setAttribute("aria-label", "Analyzing");
+  scanBtn.title = "Analyzing";
   showStatus(
     mode === "article"
-      ? "📰 Checking article credibility signals…"
-      : "🔍 Scanning text, URLs, and image content…",
+      ? "Checking article credibility signals…"
+      : "Scanning text, URLs, and image content…",
     "info"
   );
 
@@ -322,9 +341,12 @@ form.addEventListener("submit", async e => {
     if (!res.ok) throw new Error(json.error || "Analysis failed.");
     renderResult(json);
   } catch (err) {
-    showStatus("❌ " + err.message, "warn");
+    showStatus(err.message, "warn");
   } finally {
     scanBtn.disabled = false;
+    scanBtn.classList.remove("is-loading");
+    scanBtn.setAttribute("aria-label", "Analyze");
+    scanBtn.title = "Analyze";
     scanBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>';
   }
 });
@@ -379,14 +401,60 @@ function renderResult(data) {
     receiptVerdict.classList.add("hidden");
   }
 
+  // Receipt image forensics
+  const forensicsPanel = document.getElementById("forensicsPanel");
+  const forensics = data.image_forensics;
+  if (forensicsPanel) {
+    if (forensics && forensics.available) {
+      const forensicsVerdict = document.getElementById("forensicsVerdict");
+      forensicsVerdict.textContent = forensics.verdict || "—";
+      forensicsVerdict.style.color = forensics.tampering_score >= 55 ? "#ef4444"
+        : forensics.tampering_score >= 25 ? "#f59e0b" : "#10b981";
+      document.getElementById("forensicsScore").textContent = (forensics.tampering_score || 0) + " / 100";
+      document.getElementById("forensicsCanvas").textContent =
+        `${forensics.dimensions || "?"} ${forensics.format ? "(" + forensics.format + ")" : ""}`.trim();
+      forensicsPanel.classList.remove("hidden");
+    } else {
+      forensicsPanel.classList.add("hidden");
+    }
+  }
+
+  // Article source verification
+  const sourcePanel = document.getElementById("sourcePanel");
+  const source = data.source_verification;
+  if (sourcePanel) {
+    if (source) {
+      document.getElementById("sourcePublisher").textContent =
+        source.real_publisher || "Not stated by the page";
+      const ownership = document.getElementById("sourceOwnership");
+      if (source.impersonating_brand) {
+        ownership.textContent = `FAKE - impersonates ${source.impersonating_brand} (real domain: ${source.official_domain})`;
+        ownership.style.color = "#ef4444";
+      } else if (source.is_official_domain) {
+        ownership.textContent = `OFFICIAL - ${source.official_domain}`;
+        ownership.style.color = "#10b981";
+      } else {
+        ownership.textContent = "Unverified third-party domain";
+        ownership.style.color = "#f59e0b";
+      }
+      document.getElementById("sourceDomain").textContent = source.registrable_domain || "—";
+      document.getElementById("sourceAge").textContent = source.domain_age_days == null
+        ? "Registration record not public"
+        : `${source.domain_age_days} days (registered ${source.registered_on})`;
+      sourcePanel.classList.remove("hidden");
+    } else {
+      sourcePanel.classList.add("hidden");
+    }
+  }
+
   // Lists
-  fillList("flags",    data.red_flags,         "✓ No major red flags detected.");
+  fillList("flags",    data.red_flags,         "No major red flags detected.");
   fillList("positive", data.positive_signals || [], "No strong positive signals detected.");
 
   document.getElementById("action").textContent = data.action || "";
   document.getElementById("json").textContent   = JSON.stringify(data, null, 2);
 
-  showStatus("✅ Analysis complete.", "ok");
+  showStatus("Analysis complete.", "ok");
   resultSection.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -404,8 +472,12 @@ function fillList(id, items, emptyMsg) {
 // ═══════════════════════════════════════════════════
 // STATUS HELPER
 // ═══════════════════════════════════════════════════
+const STATUS_ICONS = { warn: "i-alert", ok: "i-check-circle", info: "i-info", idle: "i-info" };
+
 function showStatus(msg, type) {
-  statusEl.textContent = msg;
+  statusText.textContent = msg;
+  statusEl.classList.toggle("quiet", !msg);
+  statusIconRef.setAttribute("href", "#" + (STATUS_ICONS[type] || "i-info"));
   statusEl.style.color = type === "warn"  ? "#ef4444"
                         : type === "ok"   ? "#10b981"
                         : type === "info" ? "#2563eb"

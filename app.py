@@ -5,10 +5,14 @@ from functools import wraps
 import re
 import math
 import json
+import io
 import os
+import socket
+import threading
 import hashlib
 import hmac
 import shutil
+import sys
 import time
 import random
 import secrets
@@ -17,13 +21,55 @@ from urllib.parse import urlencode, quote
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from email.message import EmailMessage
+from html.parser import HTMLParser
 from dotenv import load_dotenv
 import requests
 
-load_dotenv()
+# Some networks advertise IPv6 for Supabase's CDN but never answer on it, which
+# costs ~40s per new connection before Python falls back to IPv4. Try IPv4 first.
+_original_getaddrinfo = socket.getaddrinfo
+
+def _getaddrinfo_ipv4_first(host, port, family=0, type=0, proto=0, flags=0):
+    infos = _original_getaddrinfo(host, port, family, type, proto, flags)
+    v4 = [info for info in infos if info[0] == socket.AF_INET]
+    return (v4 + [info for info in infos if info[0] != socket.AF_INET]) if v4 else infos
+
+socket.getaddrinfo = _getaddrinfo_ipv4_first
+
+# Receipt images are read by Windows OCR (winocr), which is installed in .\venv.
+# Running `python app.py` on the system interpreter starts fine but silently
+# cannot read any image, so hand the process over to the venv interpreter.
+def ensure_ocr_interpreter():
+    if os.environ.get("SCAMCHECK_OCR_CHECKED") == "1":
+        return False
+    os.environ["SCAMCHECK_OCR_CHECKED"] = "1"
+    try:
+        import winocr  # noqa: F401
+        return False
+    except Exception:
+        pass
+    venv_python = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "venv", "Scripts", "python.exe"
+    )
+    if os.path.exists(venv_python) and os.path.realpath(venv_python) != os.path.realpath(sys.executable):
+        print("Windows OCR is only installed in .\\venv - restarting the app with it.", flush=True)
+        os.execv(venv_python, [venv_python] + sys.argv)
+    print(
+        "WARNING: receipt images cannot be read because no OCR engine is installed here.\n"
+        "         Run: python -m venv venv && venv\\Scripts\\pip install -r requirements.txt"
+    )
+    return True
+
+ensure_ocr_interpreter()
+
+load_dotenv(override=True)
+# Read provider credentials from the existing venv/.env file without changing it.
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "venv", ".env"), override=True)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024
+# Revalidate CSS/JS every load (cheap 304s) so an edit shows up on a plain refresh.
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 app.config["UNDER_ATTACK_MODE"] = False
 app.secret_key = os.environ.get("SCAMCHECK_SECRET_KEY") or secrets.token_hex(32)
 
@@ -32,9 +78,12 @@ ADMIN_PASSWORD_HASH = os.environ.get("SCAMCHECK_ADMIN_PASSWORD_HASH", "").strip(
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "").strip()
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+# The auth form machinery writes its own audit rows through log_auth_event(),
+# so the middleware skips it. Public pages are deliberately NOT skipped — a
+# first visit is exactly what the operator needs to see with IP and device.
 AUTH_PUBLIC_PATHS = {
-    "/", "/landing", "/login", "/register", "/forgot-password",
-    "/admin/login",
+    "/login", "/register", "/forgot-password",
+    "/reset-password", "/api/auth/recovery/update", "/admin/login",
 }
 
 # ─────────────────────────────────────────────────────────
@@ -44,17 +93,52 @@ USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
 AUDIT_LOGS_FILE = os.path.join(os.path.dirname(__file__), "audit_logs.json")
 BLOCKED_IPS_FILE = os.path.join(os.path.dirname(__file__), "blocked_ips.json")
 PASSWORD_RESETS_FILE = os.path.join(os.path.dirname(__file__), "password_resets.json")
+OAUTH_IDENTITIES_FILE = os.path.join(os.path.dirname(__file__), "oauth_identities.json")
+BACKUPS_DIR = os.path.join(os.path.dirname(__file__), "backups")
 RESET_TOKEN_TTL_SECONDS = 30 * 60
+BLOCKED_IPS_CACHE_TTL_SECONDS = 30
+BLOCKED_IPS_RETRY_SECONDS = 10
+_blocked_ips_cache = {"expires_at": 0.0, "ips": []}
+
+# Reused across Supabase calls so each request skips a fresh TLS handshake.
+_SUPABASE_SESSION = requests.Session()
+
+# Storage backend: "local" (default, JSON files next to app.py) or "supabase".
+# Supabase is only used when explicitly enabled AND the credentials below are real.
+STORAGE_BACKEND = os.environ.get("SCAMCHECK_STORAGE", "local").strip().lower()
 
 def _supabase_ready():
     return (
-        SUPABASE_URL
+        STORAGE_BACKEND == "supabase"
+        and SUPABASE_URL
         and SUPABASE_SERVICE_ROLE_KEY
         and "your-project-ref" not in SUPABASE_URL
         and "your-supabase-" not in SUPABASE_SERVICE_ROLE_KEY
     )
 
-def _supabase_request(table, method="GET", query="", payload=None):
+def _supabase_auth_ready():
+    return (
+        STORAGE_BACKEND == "supabase"
+        and SUPABASE_URL
+        and SUPABASE_ANON_KEY
+        and "your-project-ref" not in SUPABASE_URL
+        and "your-supabase-" not in SUPABASE_ANON_KEY
+    )
+
+def _read_json_file(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return default
+
+def _write_json_file(path, data):
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+    os.replace(tmp_path, path)
+
+def _supabase_request(table, method="GET", query="", payload=None, timeout=None):
     if not _supabase_ready():
         raise RuntimeError(
             "Supabase is not configured. Set SUPABASE_URL and "
@@ -69,8 +153,8 @@ def _supabase_request(table, method="GET", query="", payload=None):
     if method in ("POST", "PATCH"):
         headers["Prefer"] = "resolution=merge-duplicates,return=representation"
     try:
-        response = requests.request(
-            method, url, headers=headers, json=payload, timeout=(2, 4)
+        response = _SUPABASE_SESSION.request(
+            method, url, headers=headers, json=payload, timeout=timeout or (5, 15)
         )
         if response.status_code >= 400:
             app.logger.error(
@@ -85,7 +169,44 @@ def _supabase_request(table, method="GET", query="", payload=None):
         app.logger.exception("Supabase %s request failed for %s", method, table)
         raise RuntimeError(f"Supabase storage request failed for {table}.") from exc
 
+
+def _supabase_auth_request(path, method="POST", payload=None, access_token=None):
+    """Call Supabase Auth without adding the Supabase Python dependency."""
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        raise RuntimeError("Supabase Auth is not configured.")
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {access_token or SUPABASE_ANON_KEY}",
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.request(
+            method, f"{SUPABASE_URL}/auth/v1/{path.lstrip('/')}",
+            headers=headers, json=payload, timeout=(5, 30),
+        )
+        if response.status_code >= 400:
+            detail = response.json().get("msg") or response.json().get("message", "")
+            raise RuntimeError(detail or f"Supabase Auth request failed (HTTP {response.status_code}).")
+        return response.json() if response.content else {}
+    except requests.RequestException as exc:
+        app.logger.exception("Supabase Auth request failed")
+        raise RuntimeError("Supabase Auth is unavailable.") from exc
+
 def load_users():
+    if not _supabase_ready():
+        raw = _read_json_file(USERS_FILE, {})
+        return {
+            email: {
+                "name": info.get("name", "User"),
+                "password": info.get("password"),
+                "provider": info.get("provider", "email"),
+                "role": info.get("role", "Admin" if info.get("is_admin") else "Standard User"),
+                "is_admin": bool(info.get("is_admin")) or info.get("role") == "Admin",
+                "status": info.get("status", "Active"),
+                "created_at": info.get("created_at", ""),
+            }
+            for email, info in raw.items()
+        }
     rows = _supabase_request("users", query="?select=*")
     return {
         row["email"]: {
@@ -100,7 +221,45 @@ def load_users():
         for row in rows
     }
 
+def request_password_recovery(email):
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        raise RuntimeError("Supabase Auth is not configured.")
+    response = requests.post(
+        f"{SUPABASE_URL}/auth/v1/recover",
+        headers={
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={"email": email, "redirect_to": f"{public_url()}/reset-password"},
+        timeout=(5, 30),
+    )
+    if response.status_code >= 400:
+        try:
+            detail = response.json().get("msg") or response.json().get("message", "")
+        except ValueError:
+            detail = ""
+        raise RuntimeError(detail or "Supabase password recovery request failed.")
+
+def update_supabase_user_password(email, password):
+    if not _supabase_ready():
+        users = load_users()
+        if email not in users:
+            raise RuntimeError("No local account exists for this email.")
+        users[email]["password"] = hash_password(password)
+        users[email]["provider"] = "email"
+        save_users(users)
+        return
+    user = load_user(email)
+    if not user:
+        raise RuntimeError("No account exists for this email.")
+    user["password"] = hash_password(password)
+    user["provider"] = "email"
+    save_user(email, user)
+
 def load_user(email):
+    if not _supabase_ready():
+        return load_users().get(email)
     rows = _supabase_request(
         "users", query=f"?select=*&email=eq.{quote(email, safe='')}&limit=1"
     )
@@ -118,6 +277,11 @@ def load_user(email):
     }
 
 def save_user(email, user):
+    if not _supabase_ready():
+        users = load_users()
+        users[email] = user
+        _write_json_file(USERS_FILE, users)
+        return
     _supabase_request("users", method="POST", query="?on_conflict=email", payload=[{
         "email": email,
         "name": user.get("name", "User"),
@@ -129,6 +293,9 @@ def save_user(email, user):
     }])
 
 def create_user(email, user):
+    if not _supabase_ready():
+        save_user(email, user)
+        return
     _supabase_request("users", method="POST", payload=[{
         "email": email,
         "name": user.get("name", "User"),
@@ -139,7 +306,27 @@ def create_user(email, user):
         "created_at": user.get("created_at") or datetime.now().isoformat(),
     }])
 
+def rename_user_email(old_email, new_email):
+    """Move an account to a new email, e.g. after the old mailbox was compromised."""
+    users = load_users()
+    if old_email not in users:
+        raise LookupError("User not found.")
+    if new_email in users:
+        raise ValueError("Another account already uses that email.")
+    if _supabase_ready():
+        create_user(new_email, users[old_email])
+        _supabase_request("users", method="DELETE", query=f"?email=eq.{quote(old_email, safe='')}")
+        _supabase_request("password_resets", method="DELETE", query=f"?user_email=eq.{quote(old_email, safe='')}")
+        return
+    users[new_email] = users.pop(old_email)
+    save_users(users)
+    tokens = load_password_resets()
+    save_password_resets({h: v for h, v in tokens.items() if v["email"] != old_email})
+
 def save_users(users):
+    if not _supabase_ready():
+        _write_json_file(USERS_FILE, users)
+        return
     rows = []
     for email, user in users.items():
         rows.append({
@@ -155,6 +342,27 @@ def save_users(users):
             _supabase_request("users", method="POST", query="?on_conflict=email", payload=rows)
 
 def load_audit_logs():
+    if not _supabase_ready():
+        rows = _read_json_file(AUDIT_LOGS_FILE, [])
+        return [
+            {
+                "id": row.get("id"),
+                "timestamp": row.get("timestamp", ""),
+                "ip": row.get("ip"),
+                "device": row.get("device"),
+                "os": row.get("os"),
+                "browser": row.get("browser"),
+                "method": row.get("method"),
+                "path": row.get("path"),
+                "user": row.get("user", "Anonymous Guest"),
+                "type": row.get("type", "VISIT"),
+                "threat_level": row.get("threat_level", "INFO"),
+                "payload": row.get("payload", ""),
+                "user_agent": row.get("user_agent", ""),
+                "is_blocked": row.get("is_blocked", False),
+            }
+            for row in rows
+        ]
     rows = _supabase_request("audit_logs", query="?select=*&order=timestamp.asc")
     return [
         {
@@ -177,6 +385,9 @@ def load_audit_logs():
     ]
 
 def save_audit_logs(logs):
+    if not _supabase_ready():
+        _write_json_file(AUDIT_LOGS_FILE, logs[-1000:])
+        return
     rows = []
     for log in logs[-1000:]:
         rows.append({
@@ -198,19 +409,86 @@ def save_audit_logs(logs):
     if rows:
         _supabase_request("audit_logs", method="POST", query="?on_conflict=id", payload=rows)
 
+def append_audit_log(entry):
+    """Add one audit entry without re-reading/re-uploading the whole log."""
+    if not _supabase_ready():
+        logs = load_audit_logs()
+        logs.append(entry)
+        save_audit_logs(logs)
+        return
+    row = {
+        "id": entry["id"],
+        "timestamp": entry.get("timestamp") or datetime.now().isoformat(),
+        "ip": entry.get("ip"),
+        "device": entry.get("device"),
+        "os": entry.get("os"),
+        "browser": entry.get("browser"),
+        "method": entry.get("method"),
+        "path": entry.get("path"),
+        "user_email": entry.get("user", "Anonymous Guest"),
+        "threat_type": entry.get("type", "VISIT"),
+        "threat_level": entry.get("threat_level", "INFO"),
+        "payload": entry.get("payload", ""),
+        "user_agent": entry.get("user_agent", ""),
+        "is_blocked": entry.get("is_blocked", False),
+    }
+    try:
+        _supabase_request("audit_logs", method="POST", query="?on_conflict=id",
+                          payload=[row], timeout=(10, 20))
+    except RuntimeError as exc:
+        # Supabase's CDN can stall a TLS handshake for longer than any budget a
+        # visitor should wait on, so the retry runs off-thread. The id is fixed,
+        # so on_conflict=id makes the retry harmless if the first write landed.
+        threading.Thread(target=_retry_audit_log, args=(row,), daemon=True).start()
+
+
+def _retry_audit_log(row):
+    try:
+        _supabase_request("audit_logs", method="POST", query="?on_conflict=id",
+                          payload=[row], timeout=(10, 20))
+    except RuntimeError:
+        print("Audit log write notice: Supabase refused this entry twice; it was not recorded.")
+
 def load_blocked_ips():
-    rows = _supabase_request("blocked_ips", query="?select=ip")
-    return [row["ip"] for row in rows]
+    now = time.monotonic()
+    if now < _blocked_ips_cache["expires_at"]:
+        return list(_blocked_ips_cache["ips"])
+    try:
+        if not _supabase_ready():
+            ips = [str(ip) for ip in _read_json_file(BLOCKED_IPS_FILE, [])]
+        else:
+            rows = _supabase_request("blocked_ips", query="?select=ip", timeout=(2, 4))
+            ips = [row["ip"] for row in rows]
+    except Exception as exc:
+        # This runs on every request, so a Supabase hiccup must not take the
+        # site down: keep the last known blacklist and try again shortly.
+        print("Blocked-IP refresh notice:", exc)
+        _blocked_ips_cache["expires_at"] = now + BLOCKED_IPS_RETRY_SECONDS
+        return list(_blocked_ips_cache["ips"])
+    _blocked_ips_cache["ips"] = ips
+    _blocked_ips_cache["expires_at"] = now + BLOCKED_IPS_CACHE_TTL_SECONDS
+    return list(ips)
 
 def save_blocked_ips(ips):
     unique_ips = list(dict.fromkeys(ips))
-    if unique_ips:
+    if not _supabase_ready():
+        _write_json_file(BLOCKED_IPS_FILE, unique_ips)
+    elif unique_ips:
         _supabase_request(
             "blocked_ips", method="POST", query="?on_conflict=ip",
             payload=[{"ip": ip} for ip in unique_ips]
         )
+    _blocked_ips_cache["ips"] = unique_ips
+    _blocked_ips_cache["expires_at"] = time.monotonic() + BLOCKED_IPS_CACHE_TTL_SECONDS
 
 def load_password_resets():
+    if not _supabase_ready():
+        raw = _read_json_file(PASSWORD_RESETS_FILE, {})
+        return {
+            token_hash: {"email": value["email"], "expires_at": int(value["expires_at"])}
+            for token_hash, value in raw.items()
+            if int(value.get("expires_at", 0)) > int(time.time())
+        }
     rows = _supabase_request("password_resets", query="?select=*")
     return {
         row["token_hash"]: {
@@ -221,6 +499,9 @@ def load_password_resets():
     }
 
 def save_password_resets(tokens):
+    if not _supabase_ready():
+        _write_json_file(PASSWORD_RESETS_FILE, tokens)
+        return
     rows = []
     for token_hash, value in tokens.items():
         rows.append({
@@ -231,7 +512,39 @@ def save_password_resets(tokens):
     if rows:
         _supabase_request("password_resets", method="POST", query="?on_conflict=token_hash", payload=rows)
 
+def save_password_reset_otp(email, otp):
+    if not _supabase_ready():
+        tokens = load_password_resets()
+        tokens = {t: v for t, v in tokens.items() if v["email"] != email}
+        tokens[hash_password(otp)] = {
+            "email": email,
+            "expires_at": int(time.time()) + RESET_TOKEN_TTL_SECONDS,
+        }
+        save_password_resets(tokens)
+        return
+    _supabase_request(
+        "password_resets",
+        method="DELETE",
+        query=f"?user_email=eq.{quote(email, safe='')}",
+    )
+    _supabase_request(
+        "password_resets",
+        method="POST",
+        payload=[{
+            "token_hash": hash_password(otp),
+            "user_email": email,
+            "expires_at": datetime.fromtimestamp(
+                time.time() + RESET_TOKEN_TTL_SECONDS
+            ).isoformat(),
+        }],
+    )
+
 def delete_password_reset(token_hash):
+    if not _supabase_ready():
+        tokens = load_password_resets()
+        tokens.pop(token_hash, None)
+        save_password_resets(tokens)
+        return
     _supabase_request(
         "password_resets",
         method="DELETE",
@@ -244,31 +557,34 @@ def hash_password(password):
 def password_is_valid(password):
     return len(password) >= 8
 
-def send_password_reset_email(email, token):
+def send_password_reset_email(email, otp):
     smtp_host = os.environ.get("SCAMCHECK_SMTP_HOST", "smtp.gmail.com").strip()
     try:
         smtp_port = int(os.environ.get("SCAMCHECK_SMTP_PORT", "587"))
     except ValueError as exc:
         raise RuntimeError("SCAMCHECK_SMTP_PORT must be a valid number.") from exc
     smtp_user = os.environ.get("SCAMCHECK_SMTP_USER", "").strip()
-    smtp_password = os.environ.get("SCAMCHECK_SMTP_PASSWORD", "").strip()
-    sender = os.environ.get("SCAMCHECK_SMTP_FROM", smtp_user).strip()
-    base_url = os.environ.get("SCAMCHECK_PUBLIC_URL", "http://127.0.0.1:5000").rstrip("/")
-    if not all((smtp_host, smtp_user, smtp_password, sender)) or "@" not in smtp_user or "@" not in sender:
+    smtp_password = re.sub(
+        r"\s+",
+        "",
+        os.environ.get("SCAMCHECK_SMTP_PASSWORD", ""),
+    )
+    sender = os.environ.get("SCAMCHECK_SMTP_FROM", smtp_user).strip() or smtp_user
+    if not smtp_host or not smtp_user or not smtp_password:
         raise RuntimeError(
-            "Gmail SMTP is not configured. Set SCAMCHECK_SMTP_USER and "
-            "SCAMCHECK_SMTP_FROM to a valid Gmail address and "
-            "SCAMCHECK_SMTP_PASSWORD to a Gmail App Password."
+            "SMTP is not configured. Set SCAMCHECK_SMTP_HOST, "
+            "SCAMCHECK_SMTP_USER, and SCAMCHECK_SMTP_PASSWORD."
         )
+    if "@" not in sender:
+        sender = smtp_user
 
     message = EmailMessage()
-    message["Subject"] = "ScamCheck AI password reset"
+    message["Subject"] = "ScamCheck AI password reset OTP"
     message["From"] = sender
     message["To"] = email
     message.set_content(
-        f"Use this link within 30 minutes to reset your password:\n\n"
-        f"{base_url}/reset-password/{token}\n\n"
-        "If you did not request this, ignore this email."
+        f"Your ScamCheck AI password reset OTP is: {otp}\n\n"
+        "This code expires in 30 minutes. If you did not request this, ignore this email.\n"
     )
     smtp_class = smtplib.SMTP_SSL if smtp_port == 465 else smtplib.SMTP
     with smtp_class(smtp_host, smtp_port, timeout=15) as smtp:
@@ -277,12 +593,48 @@ def send_password_reset_email(email, token):
         smtp.login(smtp_user, smtp_password)
         smtp.send_message(message)
 
+def _deliver_reset_otp(email, otp):
+    """Send the OTP outside the request thread so the page answers immediately."""
+    try:
+        send_password_reset_email(email, otp)
+    except (RuntimeError, smtplib.SMTPException, OSError) as exc:
+        app.logger.warning("Password reset OTP delivery failed for %s: %s", email, exc)
+        try:
+            delete_password_reset(hash_password(otp))
+        except RuntimeError:
+            app.logger.warning("Could not discard undelivered OTP for %s", email)
+
+def log_auth_event(event_type, email, detail=""):
+    try:
+        client_ip = resolve_client_ip(request)
+        user_agent = request.headers.get("User-Agent", "")
+        device, os_name, browser = parse_user_agent(user_agent)
+        append_audit_log({
+            "id": hashlib.md5(f"{datetime.now().isoformat()}-{client_ip}-{email}-{event_type}".encode()).hexdigest()[:8],
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "ip": client_ip,
+            "device": device,
+            "os": os_name,
+            "browser": browser,
+            "method": request.method,
+            "path": request.path,
+            "user": email,
+            "type": event_type,
+            "threat_level": "",
+            "payload": detail,
+            "user_agent": user_agent[:120],
+            "is_blocked": False,
+        })
+    except Exception as e:
+        print("Audit log write notice:", e)
+
 def is_configured_admin(email, password):
     return (
         bool(ADMIN_EMAIL and ADMIN_PASSWORD_HASH)
         and email == ADMIN_EMAIL
         and hmac.compare_digest(hash_password(password), ADMIN_PASSWORD_HASH)
-    )
+
+     )
 
 def login_required(f):
     @wraps(f)
@@ -296,6 +648,13 @@ def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not session.get("is_admin"):
+            # JSON for API calls: a 302 to the HTML login page made every admin
+            # panel die with "Unexpected token '<'" instead of saying what happened.
+            if request.path.startswith("/api/"):
+                return jsonify({
+                    "error": "Admin session expired. Sign in to the Security Center again.",
+                    "reauth_url": url_for("admin_login"),
+                }), 401
             flash("Admin authentication required.", "error")
             return redirect(url_for("admin_login"))
         return f(*args, **kwargs)
@@ -304,53 +663,155 @@ def admin_required(f):
 # ─────────────────────────────────────────────────────────
 # DEVICE & USER-AGENT PARSER
 # ─────────────────────────────────────────────────────────
+import ipaddress
+
+# Android is the only platform whose User-Agent discloses the handset model,
+# and the model prefix tells us who built it.
+ANDROID_VENDOR_BY_MODEL = (
+    ("SM-", "Samsung Galaxy"), ("GT-", "Samsung Galaxy"), ("SCH-", "Samsung Galaxy"),
+    ("Redmi", "Xiaomi Redmi"), ("POCO", "Xiaomi POCO"), ("MI ", "Xiaomi"), ("M2", "Xiaomi"),
+    ("RMX", "Realme"), ("CPH", "OPPO"), ("Infinix", "Infinix"), ("TECNO", "Tecno"),
+    ("Vivo", "Vivo"), ("Pixel", "Google Pixel"), ("Moto", "Motorola"), ("Nokia", "Nokia"),
+    ("OnePlus", "OnePlus"), ("LM-", "LG"), ("NE", "Huawei"), ("JAD", "Huawei"),
+)
+
+ATTACK_TOOL_TOKENS = (
+    "sqlmap", "nikto", "nmap", "masscan", "dirbuster", "gobuster", "hydra", "acunetix",
+    "w3af", "openvas", "nuclei", "zgrab", "whatweb", "havij", "sqlninja", "wpscan",
+)
+SCRIPT_CLIENT_TOKENS = (
+    "python-requests", "python-urllib", "curl", "wget", "okhttp", "go-http-client",
+    "postmanruntime", "insomnia", "node-fetch", "axios", "libwww", "java/",
+)
+
+
+def _android_model(ua):
+    match = re.search(r"Android [\d.]+;([^;)]+)", ua)
+    if not match:
+        return ""
+    model = re.sub(r"\s*Build/.*$", "", match.group(1), flags=re.I).strip()
+    return "" if model.lower() in ("w", "u", "build") else model
+
+
+def _android_device_name(ua):
+    model = _android_model(ua)
+    if not model:
+        return "Android tablet" if "mobile" not in ua.lower() else "Android phone"
+    for prefix, vendor in ANDROID_VENDOR_BY_MODEL:
+        if model.upper().startswith(prefix.strip().upper()):
+            # "Redmi Note 9 Pro" already names itself; don't say "Xiaomi Redmi Redmi".
+            return model if vendor.split()[-1].lower() in model.lower() else vendor + " " + model
+    return model
+
+
+def _os_version(ua, ua_lower):
+    if "windows nt 10.0" in ua_lower:
+        return "Windows 10/11"
+    for token, label in (("windows nt 6.3", "Windows 8.1"), ("windows nt 6.2", "Windows 8"),
+                         ("windows nt 6.1", "Windows 7")):
+        if token in ua_lower:
+            return label
+    if "windows phone" in ua_lower:
+        return "Windows Phone"
+    if "windows" in ua_lower:
+        return "Windows"
+    android = re.search(r"Android ([\d.]+)", ua)
+    if android:
+        return "Android " + android.group(1)
+    apple = re.search(r"(?:iPhone|iPad|iPod);.*?OS ([\d_]+) like", ua)
+    if apple:
+        kind = "iOS " if ("iphone" in ua_lower or "ipod" in ua_lower) else "iPadOS "
+        return kind + apple.group(1).replace("_", ".")
+    mac = re.search(r"Mac OS X ([\d_.]+)", ua)
+    if mac and "cros" not in ua_lower:
+        return "macOS " + mac.group(1).replace("_", ".")
+    if "cros" in ua_lower:
+        return "ChromeOS"
+    if "ubuntu" in ua_lower:
+        return "Ubuntu Linux"
+    if "linux" in ua_lower:
+        return "Linux"
+    return "Unknown OS"
+
+
+def _browser_name(ua_lower):
+    if "edg/" in ua_lower or "edge/" in ua_lower:
+        return "Microsoft Edge"
+    if "opr/" in ua_lower or "opera/" in ua_lower:
+        return "Opera"
+    if "samsungbrowser" in ua_lower:
+        return "Samsung Internet"
+    if "firefox/" in ua_lower:
+        return "Mozilla Firefox"
+    if "chromium/" in ua_lower:
+        return "Chromium"
+    if "chrome/" in ua_lower:
+        return "Google Chrome"
+    if "crios/" in ua_lower:
+        return "Chrome on iOS"
+    if "safari/" in ua_lower:
+        return "Apple Safari"
+    return "Standard Web Browser"
+
+
 def parse_user_agent(ua_str):
-    ua = ua_str or ""
+    """Return (device, os, browser) naming the actual handset or tool when known."""
+    ua = (ua_str or "").strip()
     ua_lower = ua.lower()
 
-    # Device Detection
-    if any(k in ua_lower for k in ["ipad", "tablet", "kindle"]):
-        device = "Tablet"
-    elif any(k in ua_lower for k in ["mobile", "android", "iphone", "ipod", "blackberry", "windows phone"]):
-        device = "Mobile"
-    else:
-        device = "Desktop"
+    if not ua:
+        return "Unknown device (no User-Agent)", "Unknown OS", "Unknown Client"
 
-    # OS Detection
-    if "windows nt 10.0" in ua_lower or "windows 11" in ua_lower or "windows 10" in ua_lower:
-        os_name = "Windows 10/11"
-    elif "windows" in ua_lower:
-        os_name = "Windows"
-    elif "iphone" in ua_lower or "ipad" in ua_lower or "ios" in ua_lower:
-        os_name = "iOS"
-    elif "android" in ua_lower:
-        os_name = "Android"
-    elif "macintosh" in ua_lower or "mac os" in ua_lower:
-        os_name = "macOS"
-    elif "linux" in ua_lower:
-        os_name = "Linux"
+    for tool in ATTACK_TOOL_TOKENS:
+        if tool in ua_lower:
+            return tool + " (attack tool)", "Non-browser client", "Scanner / Attack Tool"
+    for client in SCRIPT_CLIENT_TOKENS:
+        if client in ua_lower:
+            return ua.split()[0][:40] + " (script client)", "Non-browser client", "Automated Client"
+    if any(token in ua_lower for token in ("bot", "crawler", "spider", "slurp")):
+        named = re.search(r"([A-Za-z0-9._-]+(?:bot|crawler|spider|slurp))", ua)
+        return (named.group(1) if named else "Unknown")[:40] + " (bot)", "Non-browser client", "Crawler / Bot"
+
+    os_name = _os_version(ua, ua_lower)
+    browser = _browser_name(ua_lower)
+
+    if "android" in ua_lower:
+        device = _android_device_name(ua)
+    elif "iphone" in ua_lower:
+        device = "iPhone"
+    elif "ipod" in ua_lower:
+        device = "iPod touch"
+    elif "ipad" in ua_lower:
+        device = "iPad"
     elif "cros" in ua_lower:
-        os_name = "ChromeOS"
+        device = "Chromebook"
+    elif "macintosh" in ua_lower:
+        device = "Mac"
+    elif "windows" in ua_lower:
+        device = "Windows PC"
+    elif "linux" in ua_lower:
+        device = "Linux Desktop"
     else:
-        os_name = "Unknown OS"
-
-    # Browser Detection
-    if "edg/" in ua_lower:
-        browser = "Microsoft Edge"
-    elif "chrome/" in ua_lower and "chromium" not in ua_lower and "edg" not in ua_lower:
-        browser = "Google Chrome"
-    elif "firefox/" in ua_lower:
-        browser = "Mozilla Firefox"
-    elif "safari/" in ua_lower and "chrome" not in ua_lower:
-        browser = "Apple Safari"
-    elif "opera/" in ua_lower or "opr/" in ua_lower:
-        browser = "Opera"
-    elif any(bot in ua_lower for bot in ["sqlmap", "nikto", "curl", "postman", "python-requests", "bot", "crawler", "spider"]):
-        browser = "Scanner / Automated Client"
-    else:
-        browser = "Standard Web Browser"
-
+        device = "Unknown device"
     return device, os_name, browser
+
+
+def resolve_client_ip(req):
+    """The real visitor IP.
+
+    X-Forwarded-For is honoured only when the request reached us from a proxy
+    (a private peer address); otherwise any visitor could forge the header and
+    hide behind a fake IP in the audit log.
+    """
+    direct = (req.remote_addr or "").strip()
+    forwarded = req.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    try:
+        behind_proxy = bool(direct) and ipaddress.ip_address(direct).is_private
+    except ValueError:
+        behind_proxy = True
+    if forwarded and behind_proxy:
+        return forwarded
+    return direct or forwarded or "unknown"
 
 # ─────────────────────────────────────────────────────────
 # INTRUSION & ATTACK DETECTION PATTERNS
@@ -408,13 +869,8 @@ def security_telemetry_middleware():
     # Skip static files from clogging telemetry
     if request.path.startswith("/static/") or request.path in AUTH_PUBLIC_PATHS:
         return
-    if not _supabase_ready():
-        return
 
-    # Extract client IP
-    client_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "127.0.0.1")
-    if "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
+    client_ip = resolve_client_ip(request)
 
     blocked_ips = load_blocked_ips()
     
@@ -465,10 +921,17 @@ def security_telemetry_middleware():
         "is_blocked": client_ip in blocked_ips
     }
 
+    # Every visitor and every attack is recorded. Suspicious or state-changing
+    # requests are written inline so a Block-IP click sees them immediately;
+    # routine page views are written off-thread so a page load never waits on
+    # Supabase just to log the visit.
     try:
-        logs = load_audit_logs()
-        logs.append(log_entry)
-        save_audit_logs(logs)
+        if threat_type or request.method != "GET":
+            append_audit_log(log_entry)
+        else:
+            threading.Thread(
+                target=append_audit_log, args=(log_entry,), daemon=True
+            ).start()
     except Exception as e:
         print("Audit log write notice:", e)
 
@@ -624,13 +1087,25 @@ def analyze_receipt(text):
     if not text or len(words) < 3:
         return {
             "analysis_type": "receipt",
-            "risk_score": 0,
+            # An unreadable receipt must never be presented as low risk.
+            # It is unverified, not proof of a genuine payment.
+            "risk_score": 70,
             "risk_level": "UNVERIFIED",
-            "verdict": "Unverified / Cannot Read Image",
+            "verdict": "Unverified - Text Not Readable",
             "platform": "Unknown",
-            "red_flags": ["No readable text could be extracted from this image. Screenshot may be too blurry, dark, or not a direct digital screenshot."],
+            "red_flags": [
+                "The receipt text could not be read from this image. A chat thumbnail, a forwarded "
+                "and re-compressed copy, or heavy downscaling is usually the cause - it is not proof "
+                "of a fake payment."
+            ],
             "positive_signals": [],
-            "action": "Please upload a clear, direct screenshot from inside your GCash/banking app, or copy and paste the transaction details into the text box.",
+            "action": (
+                "Send the full-size screenshot as saved inside the GCash/Maya/bank app instead of a "
+                "preview or forwarded copy, or paste the transaction details into the text box. "
+                "The image is still checked for editing and AI traces even when the text cannot be read."
+            ),
+            "has_reference_number": False,
+            "amounts_found": [],
             "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
@@ -829,12 +1304,451 @@ def analyze_receipt(text):
     }
 
 
+# ===== RECEIPT IMAGE FORENSICS: edited / AI-generated detection =====
+
+EDITING_SOFTWARE_TOKENS = {
+    "photoshop": "Adobe Photoshop", "illustrator": "Adobe Illustrator",
+    "lightroom": "Adobe Lightroom", "gimp": "GIMP", "paint.net": "Paint.NET",
+    "pixlr": "Pixlr", "picsart": "Picsart", "canva": "Canva",
+    "photopea": "Photopea", "snaptu": "SNAPTU", "facetune": "FaceTune",
+    "luminar": "Luminar", "affinity": "Affinity Photo", "felgo": "Felgo",
+    "mspaint": "MS Paint", "coreldraw": "CorelDRAW", "krita": "Krita",
+}
+
+AI_GENERATOR_TOKENS = {
+    "midjourney": "Midjourney", "stable diffusion": "Stable Diffusion",
+    "stable-diffusion": "Stable Diffusion", "automatic1111": "Stable Diffusion (A1111)",
+    "comfyui": "ComfyUI", "sdxl": "Stable Diffusion XL", "sd-turbo": "Stable Diffusion Turbo",
+    "dall-e": "DALL-E", "sora": "OpenAI Sora", "imagen": "Google Imagen",
+    "firefly": "Adobe Firefly", "ideogram": "Ideogram", "ai-generated": "labelled AI-generated",
+    "contentcredentials": "C2PA content claim",
+}
+
+AI_METADATA_KEYS = {
+    "parameters", "prompt", "negative_prompt", "sampler", "cfg scale",
+    "seed", "model_name", "workflow", "comment", "description",
+}
+
+EXIF_SOFTWARE_TAG = 0x0131
+EXIF_DATETIME_TAG = 0x0132
+EXIF_SUBIFD_TAG = 0x8769
+EXIF_DATETIME_ORIGINAL_TAG = 0x9003
+
+
+def _metadata_provenance(img, raw_bytes):
+    """Pull provenance strings from EXIF, text chunks, and embedded XMP/C2PA blocks."""
+    chunks = []
+    try:
+        exif = img.getexif()
+        for tag in (EXIF_SOFTWARE_TAG, EXIF_DATETIME_TAG):
+            value = exif.get(tag)
+            if value:
+                chunks.append(str(value))
+        original = (exif.get_ifd(EXIF_SUBIFD_TAG) or {}).get(EXIF_DATETIME_ORIGINAL_TAG) if exif else None
+        if original:
+            chunks.append(str(original))
+    except Exception:
+        pass
+
+    for key, value in (img.info or {}).items():
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", "ignore")
+        if not isinstance(value, str) or not value:
+            continue
+        if isinstance(key, str) and key.lower() in AI_METADATA_KEYS:
+            chunks.append(f"{key} {value[:2000]}")
+        else:
+            chunks.append(value[:2000])
+
+    for blob in (raw_bytes[:200_000], raw_bytes[-200_000:]):
+        text = blob.decode("latin-1", "ignore").lower()
+        if "c2pa" in text or "claim_generator" in text or "xmp" in text:
+            chunks.append(text)
+
+    haystack = " ".join(chunks).lower()
+    editors = sorted({name for token, name in EDITING_SOFTWARE_TOKENS.items() if token in haystack})
+    generators = sorted({name for token, name in AI_GENERATOR_TOKENS.items() if token in haystack})
+    return editors, generators
+
+
+def _error_level_analysis(img, quality=90, block=32):
+    """Re-compress the image and report how unevenly the blocks compress."""
+    from PIL import Image, ImageChops, ImageStat
+    rgb = img.convert("RGB")
+    buf = io.BytesIO()
+    rgb.save(buf, format="JPEG", quality=quality)
+    buf.seek(0)
+    with Image.open(buf) as recompressed:
+        diff = ImageChops.difference(rgb, recompressed).convert("L")
+    mean_error = ImageStat.Stat(diff).mean[0]
+    width, height = diff.size
+    threshold = max(6.0, mean_error * 3)
+    hot = total = 0
+    for top in range(0, height - block + 1, block):
+        for left in range(0, width - block + 1, block):
+            region = diff.crop((left, top, left + block, top + block))
+            total += 1
+            if ImageStat.Stat(region).mean[0] > threshold:
+                hot += 1
+    hot_pct = round(hot / total * 100, 1) if total else 0.0
+    return round(mean_error, 2), hot_pct
+
+
+# Diffusion models export on fixed canvases; phone receipts never do.
+AI_CANVAS_SIZES = {
+    (512, 512), (768, 768), (1024, 1024), (1280, 1280), (1536, 1536),
+    (832, 1216), (1216, 832), (1024, 1536), (1536, 1024), (896, 1152),
+    (1152, 896), (1344, 768), (768, 1344), (1088, 1920), (1920, 1088),
+}
+
+
+def _canvas_fingerprint(width, height):
+    """Score how implausible the image canvas is for a real receipt screenshot."""
+    points = 0
+    evidence = []
+    if (width, height) in AI_CANVAS_SIZES:
+        points += 45
+        evidence.append(
+            f"Canvas is {width}x{height} - a standard AI image-generator output size, "
+            "not a phone screenshot resolution."
+        )
+    elif width and height and abs(width - height) / max(width, height) < 0.04 and width >= 512:
+        points += 22
+        evidence.append(f"Canvas is square ({width}x{height}) — receipts are tall phone screenshots.")
+    if width and height:
+        ratio = height / width
+        if ratio < 1.15 or ratio > 3.0:
+            points += 12
+            evidence.append(f"Aspect ratio {round(ratio, 2)}:1 is unusual for a GCash/Maya/bank screenshot.")
+    return min(60, points), evidence
+
+
+OCR_ACCEPTABLE_QUALITY = 30
+OCR_GOOD_QUALITY = 140
+OCR_KEYWORD_TOKENS = (
+    "gcash", "maya", "paymaya", "reference", "confirmation", "transaction",
+    "amount", "total", "balance", "wallet", "received", "sent", "bpi", "bdo",
+)
+
+
+def _ocr_quality(text):
+    """Rank an OCR read so the engine can keep the usable pass and drop mush."""
+    if not text:
+        return 0
+    lowered = text.lower()
+    score = sum(ch.isalnum() for ch in text)
+    score += 30 * sum(1 for token in OCR_KEYWORD_TOKENS if token in lowered)
+    return score
+
+
+def _ocr_candidates(img):
+    """Return preprocessed copies to feed the OCR engine, cheapest first.
+
+    A small upload (a chat thumbnail or forwarded preview) carries almost no
+    stroke data, and Windows OCR cannot recover it from one fixed upscale, so
+    several magnification and sharpening passes are tried instead.
+    """
+    from PIL import Image, ImageOps, ImageFilter
+
+    w, h = img.size
+    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+        backdrop = Image.new("RGBA", img.size, (255, 255, 255, 255))
+        img = Image.alpha_composite(backdrop, img.convert("RGBA"))
+    gray = ImageOps.grayscale(img)
+
+    if w >= 900:
+        scales = (1.0, 1.6)
+    else:
+        base = max(2.0, min(5.0, 1000 / max(w, 1)))
+        scales = tuple(sorted({round(base * factor, 2) for factor in (0.5, 0.85, 1.0, 1.25)}))
+
+    candidates = []
+    for scale in scales:
+        target_w = min(int(w * scale), 2400)
+        target_h = max(1, int(h * target_w / max(w, 1)))
+        upscaled = ImageOps.autocontrast(
+            gray.resize((target_w, target_h), Image.Resampling.LANCZOS)
+        )
+        for prepared in (
+            upscaled.filter(ImageFilter.SHARPEN),
+            upscaled.filter(ImageFilter.UnsharpMask(radius=3, percent=250, threshold=2)),
+        ):
+            candidates.append(ImageOps.expand(prepared, border=36, fill=255).convert("RGB"))
+    return candidates
+
+
+def _winocr_pass(candidates):
+    """Best (text, lines) Windows OCR can produce from the candidate copies."""
+    import asyncio
+    try:
+        import winocr
+    except Exception as exc:
+        print("winocr unavailable notice:", exc)
+        return "", [], 0
+
+    best = ("", [], 0)
+    for candidate in candidates:
+        try:
+            result = asyncio.run(winocr.recognize_pil(candidate, "en"))
+        except Exception as exc:
+            print("winocr notice:", exc)
+            continue
+        text = (result.text or "").strip()
+        quality = _ocr_quality(text)
+        if quality <= best[2]:
+            continue
+        lines = []
+        for line in (result.lines or []):
+            boxes = [word.bounding_rect for word in line.words]
+            if not boxes or not line.text.strip():
+                continue
+            top = min(box.y for box in boxes)
+            bottom = max(box.y + box.height for box in boxes)
+            lines.append((line.text.strip(), top, bottom - top))
+        best = (text, lines, quality)
+        if quality >= OCR_GOOD_QUALITY:
+            break
+    return best
+
+
+def _pytesseract_pass(candidates):
+    import os
+    try:
+        import pytesseract
+    except Exception as exc:
+        print("pytesseract unavailable notice:", exc)
+        return "", 0
+    for path in (
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
+    ):
+        if os.path.exists(path):
+            pytesseract.pytesseract.tesseract_cmd = path
+            break
+    else:
+        return "", 0
+    for candidate in candidates:
+        for config in (r'--oem 3 --psm 6', r'--oem 3 --psm 4', ""):
+            try:
+                text = pytesseract.image_to_string(candidate, config=config).strip()
+            except Exception as exc:
+                print("pytesseract notice:", exc)
+                return "", 0
+            if _ocr_quality(text) >= OCR_ACCEPTABLE_QUALITY:
+                return text, _ocr_quality(text)
+    return "", 0
+
+
+def ocr_image(raw_bytes):
+    """Read receipt text from image bytes. Returns (text, [(text, top, height)])."""
+    from PIL import Image
+    if not raw_bytes:
+        return "", []
+    try:
+        img = Image.open(io.BytesIO(raw_bytes))
+        img.load()
+    except Exception as exc:
+        print("Image open error:", exc)
+        return "", []
+
+    candidates = _ocr_candidates(img)
+    text, lines, quality = _winocr_pass(candidates)
+    if quality < OCR_ACCEPTABLE_QUALITY:
+        fallback_text, fallback_quality = _pytesseract_pass(candidates)
+        if fallback_quality > quality:
+            text, lines, quality = fallback_text, [], fallback_quality
+    if quality < OCR_ACCEPTABLE_QUALITY and not AMOUNT_TEXT_PATTERN.search(text or ""):
+        return "", []
+    return text, lines
+
+
+AMOUNT_TEXT_PATTERN = re.compile(r"(?:₱|php|p)\s*[\d,]+(?:\.\d{1,2})?|[\d,]{3,}\.\d{2}", re.I)
+
+
+def _typography_anomalies(lines):
+    """Look for receipt text that does not match the rest of the receipt's layout."""
+    if len(lines) < 4:
+        return 0, ["Text layout could not be measured (too little text was readable in this image)."]
+    heights = sorted(height for _, _, height in lines if height > 0)
+    median_height = heights[len(heights) // 2]
+    evidence = []
+    points = 0
+
+    amount_lines = [line for line in lines if AMOUNT_TEXT_PATTERN.search(line[0])]
+    if len(amount_lines) >= 2 and median_height:
+        odd = [
+            line for line in amount_lines
+            if line[2] > median_height * 1.6 or line[2] < median_height * 0.6
+        ]
+        if odd:
+            points += 25
+            evidence.append(
+                "Amount text is sized differently from the rest of the receipt ("
+                + "; ".join(f"'{text[:24]}' height {int(h)}px vs {int(median_height)}px typical"
+                            for text, _, h in odd[:2])
+                + ") — a common sign the amount was overtyped."
+            )
+
+    tops = sorted(top for _, top, _ in lines)
+    gaps = [b - a for a, b in zip(tops, tops[1:]) if b - a > 1]
+    if len(gaps) >= 3:
+        sorted_gaps = sorted(gaps)
+        median_gap = sorted_gaps[len(sorted_gaps) // 2]
+        if median_gap and any(gap > median_gap * 3.5 for gap in gaps):
+            points += 12
+            evidence.append("One line sits off the receipt's normal line grid — possible pasted element.")
+    return min(35, points), evidence
+
+
+def analyze_receipt_image(raw_bytes, ocr_lines=()):
+    """Inspect the receipt image itself for traces of editing or AI generation."""
+    from PIL import Image
+    forensics = {
+        "available": False, "tampering_score": 0, "verdict": "No image analyzed",
+        "evidence": [], "signals": [],
+    }
+    if not raw_bytes:
+        forensics["verdict"] = "Text only - no image to inspect"
+        return forensics
+    try:
+        img = Image.open(io.BytesIO(raw_bytes))
+        img.load()
+    except Exception:
+        forensics["verdict"] = "Unreadable image file"
+        return forensics
+
+    score = 0
+    evidence = []
+    signals = []
+    editors, generators = _metadata_provenance(img, raw_bytes)
+    if generators:
+        score += 60
+        evidence.append("AI image-generator trace in metadata: " + ", ".join(generators))
+    if editors:
+        score += 35
+        evidence.append("Image-editor trace in metadata: " + ", ".join(editors))
+
+    canvas_points, canvas_evidence = _canvas_fingerprint(img.size[0], img.size[1])
+    score += canvas_points
+    evidence.extend(canvas_evidence)
+
+    layout_points, layout_evidence = _typography_anomalies(ocr_lines)
+    score += layout_points
+    evidence.extend(e for e in layout_evidence if "could not be measured" not in e)
+    signals.extend(e for e in layout_evidence if "could not be measured" in e)
+    if layout_points == 0 and not any("could not be measured" in e for e in layout_evidence):
+        signals.append("Text sizes and line spacing are consistent across the receipt.")
+
+    ela_mean = ela_hot = 0.0
+    try:
+        ela_mean, ela_hot = _error_level_analysis(img)
+    except Exception as exc:
+        print("ELA notice:", exc)
+    if img.format == "PNG":
+        signals.append("PNG (lossless) - compression forensics are limited; metadata and layout carry the weight.")
+
+    score = min(100, score)
+    if score >= 55:
+        verdict = "LIKELY EDITED OR AI-GENERATED"
+    elif score >= 25:
+        verdict = "POSSIBLY EDITED - VERIFY MANUALLY"
+    else:
+        verdict = "NO IMAGE-EDITING TRACES FOUND"
+
+    forensics.update({
+        "available": True,
+        "format": img.format or "unknown",
+        "dimensions": f"{img.size[0]}x{img.size[1]}",
+        "editing_software": editors,
+        "ai_generators": generators,
+        "ela_mean_error": ela_mean,
+        "ela_hot_regions_pct": ela_hot,
+        "tampering_score": score,
+        "verdict": verdict,
+        "evidence": evidence,
+        "signals": signals,
+    })
+    return forensics
+
+
+def merge_receipt_forensics(result, forensics):
+    """Fold image forensics into the OCR-based receipt verdict."""
+    result["image_forensics"] = forensics
+    if not forensics.get("available"):
+        return result
+    result["red_flags"] = list(dict.fromkeys(result.get("red_flags", []) + forensics["evidence"]))
+    result["positive_signals"] = list(dict.fromkeys(result.get("positive_signals", []) + forensics["signals"]))
+    score = min(100, int(result.get("risk_score", 0)) + forensics["tampering_score"])
+    result["risk_score"] = score
+    if forensics["tampering_score"] >= 55:
+        result["risk_level"] = "HIGH RISK"
+        result["verdict"] = "Edited / AI-generated image"
+        result["action"] = (
+            "Do not accept this receipt. The image itself carries editing or AI-generation "
+            "traces even if the text looks well-formed. Confirm the payment inside your own "
+            "GCash/Maya/bank app before releasing goods or services."
+        )
+    elif forensics["tampering_score"] >= 25 and result.get("risk_level") != "HIGH RISK":
+        result["risk_level"] = "HIGH RISK" if score >= 65 else "MEDIUM RISK"
+        result["verdict"] = "Suspicious - image shows edit traces"
+    return result
+
+
 # ─────────────────────────────────────────────────────────
 # UTILITY HELPERS
 # ─────────────────────────────────────────────────────────
 
 def extract_urls(text):
     return re.findall(r'https?://[^\s<>"\']+|www\.[^\s<>"\']+', text or "", re.I)
+
+class _ArticleTextParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+        self.title_parts = []
+        self._skip_depth = 0
+        self._in_title = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {"script", "style", "noscript", "svg"}:
+            self._skip_depth += 1
+        elif tag == "title":
+            self._in_title = True
+
+    def handle_endtag(self, tag):
+        if tag in {"script", "style", "noscript", "svg"} and self._skip_depth:
+            self._skip_depth -= 1
+        elif tag == "title":
+            self._in_title = False
+
+    def handle_data(self, data):
+        if self._skip_depth:
+            return
+        value = re.sub(r"\s+", " ", data).strip()
+        if not value:
+            return
+        self.parts.append(value)
+        if self._in_title:
+            self.title_parts.append(value)
+
+def fetch_article_from_url(source_url):
+    parsed, host = domain_info(source_url)
+    if not parsed or parsed.scheme not in {"http", "https"} or not host:
+        raise ValueError("Please provide a valid http:// or https:// article link.")
+    response = requests.get(
+        clean_url(source_url),
+        headers={"User-Agent": "ScamCheckAI/1.0 article checker"},
+        timeout=(4, 10),
+    )
+    response.raise_for_status()
+    parser = _ArticleTextParser()
+    parser.feed(response.text[:2_000_000])
+    article_text = " ".join(parser.parts)
+    title = " ".join(parser.title_parts).strip()
+    if len(article_text.split()) < 20:
+        raise ValueError("The link did not contain enough readable article text.")
+    return title, article_text, response.text
 
 def clean_url(raw):
     return raw if raw.lower().startswith(("http://", "https://")) else "http://" + raw
@@ -899,15 +1813,281 @@ def analyze_urls(text, source_url=""):
     return list(dict.fromkeys(flags)), min(points, 40), list(dict.fromkeys(domains))
 
 
+# ===== ARTICLE SOURCE VERIFICATION: real publisher vs impersonating site =====
+
+MULTI_PART_TLDS = {
+    "com.ph", "net.ph", "org.ph", "gov.ph", "edu.ph", "co.ph",
+    "co.uk", "org.uk", "ac.uk", "com.sg", "com.au", "co.nz",
+    "co.jp", "com.my", "com.hk", "com.tw",
+}
+
+# Verified official domains for the Philippine brands scammers copy most often.
+OFFICIAL_DOMAINS = {
+    "inquirer.net": "Philippine Daily Inquirer",
+    "philstar.com": "The Philippine Star",
+    "abs-cbn.com": "ABS-CBN News",
+    "cnnphilippines.com": "CNN Philippines",
+    "rappler.com": "Rappler",
+    "gmanetwork.com": "GMA News",
+    "manilatimes.net": "Manila Times",
+    "malaya.com.ph": "Malaya Business Journal",
+    "businessmirror.com.ph": "Business Mirror",
+    "pna.gov.ph": "Philippine News Agency",
+    "officialgazette.gov.ph": "Official Gazette",
+    "senate.gov.ph": "Senate of the Philippines",
+    "congress.gov.ph": "House of Representatives",
+    "bsp.gov.ph": "Bangko Sentral ng Pilipinas",
+    "osp.ebsi.gov.ph": "Bureau of Treasury",
+    "gcash.com": "GCash",
+    "maya.com": "Maya",
+    "bdo.com.ph": "BDO Unibank",
+    "bpi.com.ph": "BPI",
+    "unionbankofthephilippines.com": "UnionBank",
+    "landbank.com.ph": "Landbank",
+    "pnb.com.ph": "PNB",
+    "metrobank.com.ph": "Metrobank",
+    "eastwestbanker.com": "EastWest Bank",
+    "shopee.com.ph": "Shopee Philippines",
+    "lazada.com.ph": "Lazada Philippines",
+    "facebook.com": "Meta / Facebook",
+    "youtube.com": "YouTube",
+}
+
+BRAND_TOKENS = {
+    domain.split(".")[0]: domain
+    for domain in OFFICIAL_DOMAINS
+    if len(domain.split(".")[0]) >= 5
+}
+
+
+def registrable_domain(host):
+    """Reduce a hostname to its registered domain (the part that proves ownership)."""
+    labels = [label for label in (host or "").lower().strip(".").split(".") if label]
+    if len(labels) <= 2:
+        return ".".join(labels)
+    if ".".join(labels[-2:]) in MULTI_PART_TLDS:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
+class _PageIdentityParser(HTMLParser):
+    """Collect the page's own claims about who published it."""
+
+    WANTED_META = {
+        "og:site_name", "og:title", "og:url", "twitter:site",
+        "article:publisher", "generator", "author",
+    }
+
+    def __init__(self):
+        super().__init__()
+        self.meta = {}
+        self.canonical = ""
+        self.ld_json = []
+        self._in_ld_json = False
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag == "meta":
+            key = (attributes.get("property") or attributes.get("name") or "").lower()
+            value = (attributes.get("content") or "").strip()
+            if key in self.WANTED_META and value:
+                self.meta[key] = value[:160]
+        elif tag == "link" and (attributes.get("rel") or "").lower() == "canonical":
+            self.canonical = (attributes.get("href") or "").strip()
+        elif tag == "script" and "ld+json" in (attributes.get("type") or "").lower():
+            self._in_ld_json = True
+            self.ld_json.append("")
+
+    def handle_data(self, data):
+        if self._in_ld_json and self.ld_json:
+            self.ld_json[-1] += data
+
+    def handle_endtag(self, tag):
+        if tag == "script":
+            self._in_ld_json = False
+
+
+def _jsonld_publisher(chunks):
+    for chunk in chunks:
+        try:
+            data = json.loads(chunk.strip())
+        except ValueError:
+            continue
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            publisher = item.get("publisher")
+            name = publisher.get("name") if isinstance(publisher, dict) else publisher
+            if isinstance(name, str) and name.strip():
+                return name.strip()[:120]
+    return ""
+
+
+def _rdap_domain_facts(registrable):
+    """Ask the public RDAP service when this domain was registered and by whom."""
+    if not registrable:
+        return {}
+    try:
+        response = requests.get(
+            f"https://rdap.org/domain/{registrable}",
+            headers={"Accept": "application/rdap+json", "User-Agent": "ScamCheckAI/1.0 source checker"},
+            timeout=(4, 10),
+        )
+        if response.status_code != 200:
+            return {}
+        data = response.json()
+    except (requests.RequestException, ValueError):
+        return {}
+
+    facts = {}
+    for event in data.get("events", []) or []:
+        if str(event.get("eventAction", "")).lower() in {"registration", "reg"}:
+            raw = str(event.get("eventDate", ""))[:10]
+            try:
+                registered = datetime.strptime(raw, "%Y-%m-%d")
+            except ValueError:
+                continue
+            facts["registered_on"] = raw
+            facts["domain_age_days"] = max(0, (datetime.now() - registered).days)
+    for entity in data.get("entities", []) or []:
+        roles = [str(role).lower() for role in entity.get("roles", []) or []]
+        if "registrar" not in roles or facts.get("registrar"):
+            continue
+        card = entity.get("vcardArray")
+        if isinstance(card, list) and len(card) > 1:
+            for field in card[1]:
+                if isinstance(field, list) and field and field[0] == "fn" and len(field) > 3:
+                    facts["registrar"] = str(field[3])[:80]
+        if not facts.get("registrar") and entity.get("handle"):
+            facts["registrar"] = str(entity["handle"])[:80]
+    return facts
+
+
+def verify_source(source_url, page_html=""):
+    """Report who really owns and published this link."""
+    parsed, host = domain_info(source_url)
+    facts = {
+        "requested_host": host,
+        "final_host": host,
+        "final_url": source_url,
+        "registrable_domain": registrable_domain(host),
+        "real_publisher": "",
+        "official_domain": "",
+        "is_official_domain": False,
+        "impersonating_brand": "",
+        "domain_age_days": None,
+        "registered_on": "",
+        "registrar": "",
+        "evidence": [],
+        "signals": [],
+        "risk_points": 0,
+    }
+    if not host:
+        facts["evidence"].append("The link has no readable domain, so its owner cannot be verified.")
+        facts["risk_points"] += 12
+        return facts
+
+    try:
+        response = requests.get(
+            clean_url(source_url),
+            headers={"User-Agent": "ScamCheckAI/1.0 source checker"},
+            timeout=(4, 10),
+        )
+        final_host = (urlparse(response.url).hostname or host).lower()
+        facts["final_url"] = response.url
+        facts["final_host"] = final_host
+        facts["registrable_domain"] = registrable_domain(final_host) or facts["registrable_domain"]
+        if final_host != host:
+            facts["evidence"].append(
+                f"The link actually lands on {final_host} - the visible address is not the site you end up on."
+            )
+            facts["risk_points"] += 8
+        if not page_html and "text/html" in response.headers.get("Content-Type", ""):
+            page_html = response.text
+    except requests.RequestException:
+        facts["signals"].append("The site could not be re-checked live; ownership is judged from the address itself.")
+
+    registrable = facts["registrable_domain"]
+    official_name = OFFICIAL_DOMAINS.get(registrable, "")
+    if official_name:
+        facts["is_official_domain"] = True
+        facts["official_domain"] = registrable
+        facts["signals"].append(f"{registrable} is the verified official domain of {official_name}.")
+        facts["risk_points"] -= 12
+
+    if page_html:
+        parser = _PageIdentityParser()
+        try:
+            parser.feed(page_html[:400_000])
+        except Exception:
+            pass
+        publisher = _jsonld_publisher(parser.ld_json) or parser.meta.get("og:site_name") or parser.meta.get("twitter:site", "")
+        facts["real_publisher"] = publisher.strip()
+        if parser.canonical:
+            canonical_host = (urlparse(parser.canonical).hostname or "").lower()
+            if canonical_host and registrable_domain(canonical_host) != registrable:
+                facts["evidence"].append(
+                    f"This page's canonical address is {canonical_host} - the copy you checked was republished elsewhere."
+                )
+                facts["risk_points"] += 8
+
+    if not facts["is_official_domain"]:
+        for token, brand_domain in BRAND_TOKENS.items():
+            if token in host or token in registrable:
+                facts["impersonating_brand"] = OFFICIAL_DOMAINS.get(brand_domain, brand_domain)
+                facts["official_domain"] = brand_domain
+                facts["evidence"].append(
+                    f"'{token}' appears in {registrable}, but the real {facts['impersonating_brand']} "
+                    f"domain is {brand_domain}. This domain belongs to someone else."
+                )
+                facts["risk_points"] += 45
+                break
+
+    rdap = _rdap_domain_facts(registrable)
+    facts["domain_age_days"] = rdap.get("domain_age_days")
+    facts["registered_on"] = rdap.get("registered_on", "")
+    facts["registrar"] = rdap.get("registrar", "")
+    age = facts["domain_age_days"]
+    if age is None:
+        facts["signals"].append("Registration records are not public for this domain (common for some country domains).")
+    elif age <= 90:
+        facts["risk_points"] += 20
+        facts["evidence"].append(
+            f"Domain was registered only {age} days ago ({facts['registered_on']}). "
+            "Established news outlets and banks keep their domains for years."
+        )
+    elif age <= 365:
+        facts["risk_points"] += 8
+        facts["evidence"].append(f"Domain is under a year old (registered {facts['registered_on']}).")
+    else:
+        registrar = f", via {facts['registrar']}" if facts["registrar"] else ""
+        facts["signals"].append(f"Domain registered {facts['registered_on']} ({age} days ago){registrar}.")
+
+    facts["risk_points"] = max(-15, min(60, facts["risk_points"]))
+    return facts
+
+
 # ─────────────────────────────────────────────────────────
 # SCAM MESSAGE ANALYZER
 # ─────────────────────────────────────────────────────────
 
 def analyze_text(text):
-    text = text or ""
+    text = (text or "").strip()
     lower = text.lower()
     flags = []
     score = 0
+
+    if not text:
+        return {
+            "analysis_type": "message",
+            "risk_score": 70,
+            "risk_level": "UNVERIFIED",
+            "red_flags": ["No message text could be analyzed."],
+            "action": "Paste the complete message or upload a clear screenshot before relying on the result.",
+            "urls_found": [],
+            "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
 
     for word in URGENT_WORDS:
         if word in lower:
@@ -926,6 +2106,16 @@ def analyze_text(text):
     if re.search(r"\b(otp|one[- ]time password|verification code)\b", lower):
         flags.append("Requests or references a one-time password/security code.")
         score += 12
+
+    has_urgency = any(word in lower for word in URGENT_WORDS)
+    has_sensitive_request = bool(re.search(
+        r"\b(password|passcode|otp|verification code|pin|cvv|send money|payment|"
+        r"bank account|credit card|confirm identity|verify your account)\b",
+        lower
+    ))
+    if urls and has_urgency and has_sensitive_request:
+        flags.append("Urgent message combines a link with a request for sensitive information or payment.")
+        score += 25
 
     score = min(score, 100)
     if score >= 80:
@@ -953,7 +2143,7 @@ def analyze_text(text):
 # ARTICLE CREDIBILITY ANALYZER
 # ─────────────────────────────────────────────────────────
 
-def analyze_article(title, article, source_url="", author="", pub_date=""):
+def analyze_article(title, article, source_url="", author="", pub_date="", source_verification=None):
     title      = (title or "").strip()
     article    = (article or "").strip()
     source_url = (source_url or "").strip()
@@ -967,6 +2157,29 @@ def analyze_article(title, article, source_url="", author="", pub_date=""):
     if source_url:
         urls.append(source_url)
 
+    word_count = len(re.findall(r"\b[\w'-]+\b", article))
+    if word_count < 20:
+        return {
+            "analysis_type": "article",
+            "risk_score": 70,
+            "risk_level": "UNVERIFIED",
+            "credibility": "Insufficient content",
+            "red_flags": ["The article text is too short for a reliable credibility assessment."],
+            "positive_signals": [],
+            "action": "Paste the complete article text and provide its original source URL before relying on the result.",
+            "source_url": source_url,
+            "title": title,
+            "author": author,
+            "publication_date": pub_date,
+            "word_count": word_count,
+            "readability": 0,
+            "urls_found": list(dict.fromkeys(urls)),
+            "domains_found": [],
+            "source_verification": source_verification,
+            "note": "A short or missing article cannot be classified as credible or fake.",
+            "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
     if not title:
         flags.append("Article has no title.")
         score += 6
@@ -974,7 +2187,6 @@ def analyze_article(title, article, source_url="", author="", pub_date=""):
         flags.append("Title is unusually short.")
         score += 3
 
-    word_count = len(re.findall(r"\b[\w'-]+\b", article))
     if word_count < 80:
         flags.append("Article text is very short for reliable credibility assessment.")
         score += 10
@@ -1042,21 +2254,28 @@ def analyze_article(title, article, source_url="", author="", pub_date=""):
     flags.extend(url_flags)
     score += url_points
 
-    if source_url:
-        _, host = domain_info(source_url)
-        if host:
-            if any(host == d or host.endswith("." + d) for d in COMMON_NEWS_DOMAINS):
-                positive.append(f"Source domain matches a recognized reference domain: {host}.")
-                score = max(0, score - 8)
-            else:
-                flags.append(f"Source domain is not in the app's small reference-domain list: {host}.")
-                score += 3
+    if source_verification:
+        flags.extend(source_verification["evidence"])
+        positive.extend(source_verification["signals"])
+        score += source_verification["risk_points"]
+        if source_verification.get("real_publisher"):
+            positive.append("The page names its own publisher as: " + source_verification["real_publisher"] + ".")
     else:
-        flags.append("No source URL was provided.")
+        flags.append("No source URL was provided, so the real publisher could not be verified.")
         score += 6
 
     score = min(100, max(0, score))
-    if score >= 70:
+    impersonating = bool(source_verification and source_verification.get("impersonating_brand"))
+
+    if impersonating:
+        level       = "HIGH RISK"
+        credibility = "Fake site - impersonates " + source_verification["impersonating_brand"]
+        action      = (
+            f"This is not the real {source_verification['impersonating_brand']} site. "
+            f"The address {source_verification['final_host']} is registered separately; the official one is "
+            f"{source_verification['official_domain']}. Do not trust, share, or enter any details on this page."
+        )
+    elif score >= 70:
         level       = "HIGH RISK"
         credibility = "Low credibility signals"
         action      = "Treat the article as suspicious. Verify the main claims with independent, reputable sources before sharing or acting on it."
@@ -1064,6 +2283,14 @@ def analyze_article(title, article, source_url="", author="", pub_date=""):
         level       = "MEDIUM RISK"
         credibility = "Mixed credibility signals"
         action      = "Be cautious. Check the author, date, original source, supporting evidence, and independent reporting."
+    elif source_verification and source_verification.get("is_official_domain"):
+        level       = "LOW RISK"
+        credibility = "Published on a verified official domain"
+        action      = (
+            "The domain is the verified official site of "
+            + (source_verification.get("real_publisher") or OFFICIAL_DOMAINS.get(source_verification["registrable_domain"], "this publisher"))
+            + ". Still compare the claims with other reputable outlets before sharing."
+        )
     else:
         level       = "LOW RISK"
         credibility = "Stronger credibility signals"
@@ -1085,6 +2312,7 @@ def analyze_article(title, article, source_url="", author="", pub_date=""):
         "readability": read,
         "urls_found": list(dict.fromkeys(urls)),
         "domains_found": domains,
+        "source_verification": source_verification,
         "note": "This checks credibility signals; it does not prove whether a claim is true or false.",
         "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
@@ -1149,8 +2377,71 @@ def oauth_config(provider):
         "client_secret": os.environ.get(prefix + "CLIENT_SECRET", "").strip(),
     }
 
+def _credential_usable(value):
+    lowered = (value or "").strip().lower()
+    if not lowered or len(lowered) < 12:
+        return False
+    return not any(bad in lowered for bad in ("://", "/", " ", "www."))
+
+def oauth_credentials_ready(provider):
+    credentials = oauth_config(provider)
+    if provider == "google":
+        pattern, _ = OAUTH_KEY_SHAPES["google"]["client_id"]
+        return bool(pattern.fullmatch(credentials["client_id"]))
+    return all(_credential_usable(credentials[key]) for key in ("client_id", "client_secret"))
+
+def configured_social_providers():
+    return {name for name in OAUTH_PROVIDERS if oauth_credentials_ready(name)}
+
+# What a real key looks like per provider. Used only for the startup warning, so
+# a future format change can never block a working credential.
+OAUTH_KEY_SHAPES = {
+    "google": {
+        "client_id": (re.compile(r"^[0-9]+-[A-Za-z0-9_]+\.apps\.googleusercontent\.com$"),
+                      "digits-dash-string.apps.googleusercontent.com"),
+    },
+    "facebook": {
+        "client_id": (re.compile(r"^\d{6,}$"), "digits only (App ID)"),
+        "client_secret": (re.compile(r"^[0-9a-f]{32}$"), "32 hex characters (App Secret)"),
+    },
+    "github": {
+        "client_id": (re.compile(r"^(Iv1\.|Ov23)[A-Za-z0-9]{6,}$"), "starts with Iv1. or Ov23"),
+        "client_secret": (re.compile(r"^[0-9a-f]{40}$"), "40 hex characters, shown once"),
+    },
+}
+
+def report_social_config():
+    """Tell the operator, on the terminal only, which env fields are not keys."""
+    ready = configured_social_providers()
+    for name in OAUTH_PROVIDERS:
+        if name in ready:
+            continue
+        fields = ("client_id",) if name == "google" else ("client_id", "client_secret")
+        for field in fields:
+            value = oauth_config(name)[field]
+            if not value:
+                continue
+            pattern, expected = OAUTH_KEY_SHAPES[name][field]
+            if not _credential_usable(value) or not pattern.fullmatch(value):
+                print(f"  SCAMCHECK_{name.upper()}_{field.upper()} is not a {name} {field} "
+                      f"(expected: {expected}). A website address in the browser bar is not the key.")
+    return ready
+
 def public_url():
     return os.environ.get("SCAMCHECK_PUBLIC_URL", "http://127.0.0.1:5000").rstrip("/")
+
+@app.context_processor
+def inject_social_state():
+    google_ready = oauth_credentials_ready("google")
+    nonce = secrets.token_urlsafe(32) if google_ready else ""
+    if nonce:
+        session["google_signin_nonce"] = nonce
+    return {
+        "social_ready": sorted(configured_social_providers()),
+        "google_client_id": oauth_config("google")["client_id"] if google_ready else "",
+        "google_api_key_entered": oauth_config("google")["client_id"].startswith("AIza"),
+        "google_signin_nonce": nonce,
+    }
 
 def oauth_callback_url(provider):
     return f"{public_url()}/auth/{provider}/callback"
@@ -1165,33 +2456,129 @@ def oauth_json_request(url, method="GET", data=None, headers=None):
     except (HTTPError, URLError, json.JSONDecodeError) as exc:
         raise RuntimeError("OAuth provider request failed.") from exc
 
+def load_oauth_identity(provider, provider_user_id):
+    if _supabase_ready():
+        rows = _supabase_request(
+            "oauth_identities",
+            query=("?select=user_email,provider_email,profile"
+                   f"&provider=eq.{quote(provider, safe='')}"
+                   f"&provider_user_id=eq.{quote(provider_user_id, safe='')}&limit=1"),
+        )
+        return rows[0] if rows else None
+    identities = _read_json_file(OAUTH_IDENTITIES_FILE, {})
+    return identities.get(f"{provider}:{provider_user_id}")
+
+
+def save_oauth_identity(provider, provider_user_id, email, profile):
+    # Store only public profile fields; provider access tokens are never persisted.
+    safe_profile = {
+        key: profile[key]
+        for key in ("name", "login", "picture", "avatar_url")
+        if isinstance(profile.get(key), str) and profile[key].strip()
+    }
+    identity = {
+        "user_email": email,
+        "provider": provider,
+        "provider_user_id": provider_user_id,
+        "provider_email": profile.get("email") or None,
+        "profile": safe_profile,
+    }
+    if _supabase_ready():
+        _supabase_request(
+            "oauth_identities", method="POST",
+            query="?on_conflict=provider,provider_user_id", payload=[identity],
+        )
+        return
+    identities = _read_json_file(OAUTH_IDENTITIES_FILE, {})
+    identities[f"{provider}:{provider_user_id}"] = identity
+    _write_json_file(OAUTH_IDENTITIES_FILE, identities)
+
+
 def provision_oauth_user(provider, profile):
+    provider_user_id = str(profile.get("id") or profile.get("sub") or "").strip()
+    if not provider_user_id:
+        raise RuntimeError("The provider did not return an account ID.")
+
     email = (profile.get("email") or "").strip().lower()
+    identity = load_oauth_identity(provider, provider_user_id)
+    # Once linked, a provider identity remains attached to its existing app
+    # account even if the provider later changes or stops sharing its email.
+    linked_email = ((identity or {}).get("user_email") or "").strip().lower()
+    if linked_email:
+        email = linked_email
     if not email:
         raise RuntimeError("The provider did not return an email address.")
+
     name = (profile.get("name") or profile.get("login") or email).strip()
-    users = load_users()
-    if email not in users:
-        users[email] = {
+    user = load_user(email)
+    if not user:
+        create_user(email, {
             "name": name,
             "provider": provider,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        save_users(users)
-    elif users[email].get("status", "Active") != "Active":
+        })
+        user = {"name": name, "status": "Active"}
+    elif user.get("status", "Active") != "Active":
         raise RuntimeError("This account is suspended.")
+
+    save_oauth_identity(provider, provider_user_id, email, profile)
+    start_user_session(email, user.get("name", name), provider)
+
+def start_user_session(email, name, provider):
+    """Sign a visitor in as an app user.
+
+    The admin console is a separate identity, so a normal sign-in must never
+    inherit an admin session left behind in the same browser.
+    """
+    session.pop("is_admin", None)
     session["user_email"] = email
-    session["user_name"] = users[email].get("name", name)
+    session["user_name"] = name
     session["user_provider"] = provider
 
 @app.route("/auth/<provider>")
 def social_auth(provider):
     provider = provider.lower()
     config = OAUTH_PROVIDERS.get(provider)
-    credentials = oauth_config(provider) if config else {}
-    if not config or not all(credentials.values()):
-        flash(f"{config['display'] if config else provider.title()} login is not configured yet.", "error")
+    if not config:
+        flash("That social login provider is not supported.", "error")
         return redirect(url_for("login"))
+    destination = "register" if request.args.get("mode") == "signup" else "login"
+    if provider == "google":
+        if not oauth_credentials_ready("google"):
+            google_value = oauth_config("google")["client_id"]
+            if google_value.startswith("AIza"):
+                message = (
+                    "Hindi makakonekta ang Google sign-in dahil API key ang nasa "
+                    "SCAMCHECK_GOOGLE_CLIENT_ID. Gumawa o piliin sa Google Cloud ang "
+                    "OAuth 2.0 Client ID na Web application, ilagay ang app address sa "
+                    "Authorized JavaScript origins, at palitan lang ang value ng "
+                    "SCAMCHECK_GOOGLE_CLIENT_ID sa venv/.env ng Client ID na nagtatapos "
+                    ".apps.googleusercontent.com. Hindi kailangan ang Client Secret. "
+                    "I-restart ang app pagkatapos."
+                )
+            else:
+                message = (
+                    "Kailangan ng Google sign-in ang OAuth 2.0 Web Client ID na "
+                    "nagtatapos sa .apps.googleusercontent.com sa "
+                    "SCAMCHECK_GOOGLE_CLIENT_ID line sa venv/.env. Hindi kailangan ang "
+                    "Client Secret. I-restart ang app pagkatapos palitan ang ID."
+                )
+            flash(
+                message, "info")
+        else:
+            flash("Use the Google button above to continue.", "info")
+        return redirect(url_for(destination))
+    credentials = oauth_config(provider)
+    if not any(credentials.values()):
+        flash(
+            f"{config['display']} sign-in is not configured. Add its Client ID and Client Secret "
+            "to venv/.env, then restart the app.", "info")
+        return redirect(url_for(destination))
+    if not oauth_credentials_ready(provider):
+        flash(
+            f"{config['display']} credentials are not valid. Check the Client ID and Client Secret "
+            "in venv/.env.", "info")
+        return redirect(url_for(destination))
     state = secrets.token_urlsafe(32)
     session["oauth_state"] = state
     session["oauth_provider"] = provider
@@ -1203,6 +2590,51 @@ def social_auth(provider):
         "state": state,
     }
     return redirect(config["authorize"] + "?" + urlencode(params))
+
+@app.route("/auth/google/credential", methods=["POST"])
+def google_credential_login():
+    client_id = oauth_config("google")["client_id"]
+    if not oauth_credentials_ready("google"):
+        return jsonify({"error": "Google sign-in is not configured."}), 503
+
+    payload = request.get_json(silent=True) or {}
+    credential = payload.get("credential", "")
+    gsi_error = payload.get("gsi_error", "")
+    expected_nonce = session.pop("google_signin_nonce", "")
+    if not credential:
+        # Google answers with an error instead of a credential when this site's
+        # address is not listed as an Authorized JavaScript origin for the Client
+        # ID, so saying "expired" would send the user around in circles.
+        app.logger.warning("Google returned no credential: %s %s",
+                           gsi_error, payload.get("gsi_error_description", ""))
+        return jsonify({
+            "error": "Hindi pinayagan ni Google ang address ng site na ito. "
+                     "Isama ang http://127.0.0.1:5000 sa Authorized JavaScript origins "
+                     "ng OAuth Client ID sa Google Cloud Console, then i-refresh ang login page."
+        }), 400
+    if not expected_nonce:
+        app.logger.warning("Google credential POST arrived without a sign-in nonce in this session.")
+        return jsonify({"error": "Google sign-in expired. Please try again."}), 400
+
+    try:
+        from google.auth.transport.requests import Request as GoogleAuthRequest
+        from google.oauth2 import id_token
+
+        identity = id_token.verify_oauth2_token(
+            credential, GoogleAuthRequest(), audience=client_id
+        )
+        if identity.get("nonce") != expected_nonce or not identity.get("email_verified"):
+            raise ValueError("Google identity checks failed.")
+        provision_oauth_user("google", {
+            "id": identity.get("sub", ""),
+            "email": identity.get("email", ""),
+            "name": identity.get("name", ""),
+            "picture": identity.get("picture", ""),
+        })
+        return jsonify({"next": url_for("app_dashboard")})
+    except Exception:
+        app.logger.warning("Google sign-in token verification failed.")
+        return jsonify({"error": "Google sign-in failed. Please try again."}), 401
 
 @app.route("/auth/<provider>/callback")
 def social_auth_callback(provider):
@@ -1221,7 +2653,7 @@ def social_auth_callback(provider):
         return redirect(url_for("login"))
     code = request.args.get("code", "")
     credentials = oauth_config(provider)
-    if not code or not all(credentials.values()):
+    if not code or not oauth_credentials_ready(provider):
         flash("Social login configuration is incomplete.", "error")
         return redirect(url_for("login"))
     try:
@@ -1261,19 +2693,15 @@ def login():
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
-        try:
-            user = load_user(email)
-        except RuntimeError as exc:
-            app.logger.error("Login storage is unavailable: %s", exc)
-            flash("Database is not configured. Add valid Supabase credentials to .env.", "error")
-            return render_template("login.html")
-        if (user and user.get("status", "Active") == "Active"
-                and user.get("password") == hash_password(password)):
-            session["user_email"] = email
-            session["user_name"] = user["name"]
-            session["user_provider"] = "email"
+        user = load_user(email)
+        stored_hash = (user or {}).get("password") or ""
+        if not user or not stored_hash or not hmac.compare_digest(stored_hash, hash_password(password)):
+            flash("Invalid email or password.", "error")
+        elif user.get("status", "Active") != "Active":
+            flash("This account is suspended.", "error")
+        else:
+            start_user_session(email, user["name"], user.get("provider", "email"))
             return redirect(url_for("app_dashboard"))
-        flash("Invalid email or password.", "error")
     return render_template("login.html")
 
 
@@ -1282,57 +2710,97 @@ def forgot_password():
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
         try:
-            users = load_users()
-        except RuntimeError as exc:
-            app.logger.error("Password reset storage is unavailable: %s", exc)
-            flash("Database is not configured. Add valid Supabase credentials to .env.", "error")
-            return render_template("forgot_password.html")
-        if email in users and users[email].get("provider", "email") == "email":
-            token = secrets.token_urlsafe(32)
-            resets = load_password_resets()
-            now = int(time.time())
-            resets = {
-                key: value for key, value in resets.items()
-                if value.get("expires_at", 0) > now
-            }
-            resets[hashlib.sha256(token.encode()).hexdigest()] = {
-                "email": email, "expires_at": now + RESET_TOKEN_TTL_SECONDS
-            }
-            save_password_resets(resets)
-            try:
-                send_password_reset_email(email, token)
-            except (OSError, ValueError, smtplib.SMTPException, RuntimeError):
-                app.logger.exception("Password reset email could not be sent")
-        flash("If that email is registered, a password reset link has been sent.", "info")
-        return redirect(url_for("login"))
+            user = load_user(email)
+            if not user:
+                raise LookupError("No account was found for that email.")
+
+            otp = f"{secrets.randbelow(1000000):06d}"
+            save_password_reset_otp(email, otp)
+            threading.Thread(target=_deliver_reset_otp, args=(email, otp), daemon=True).start()
+            log_auth_event("PASSWORD_RESET_REQUESTED", email, "otp_email_dispatched")
+        except LookupError:
+            app.logger.warning("Forgot password request for unknown email: %s", email)
+            flash("We couldn't find an account for that email.", "error")
+            return render_template("forgot_password.html", email=email)
+        except (RuntimeError, requests.RequestException, smtplib.SMTPException) as exc:
+            app.logger.warning("Custom password recovery OTP request failed: %s", exc)
+            flash("We couldn't process the password reset request right now. Please try again later.", "error")
+            return render_template("forgot_password.html", email=email)
+        return render_template("forgot_password.html", otp_sent=True, email=email)
     return render_template("forgot_password.html")
 
 
-@app.route("/reset-password/<token>", methods=["GET", "POST"])
-def reset_password(token):
-    resets = load_password_resets()
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-    reset = resets.get(token_hash)
-    if not reset or reset.get("expires_at", 0) <= int(time.time()):
-        flash("This password reset link is invalid or expired.", "error")
-        return redirect(url_for("forgot_password"))
-    if request.method == "POST":
-        password = request.form.get("password", "")
-        confirm = request.form.get("confirm", "")
-        if not password_is_valid(password):
-            flash("Password must be at least 8 characters.", "error")
-        elif password != confirm:
-            flash("Passwords do not match.", "error")
-        else:
-            users = load_users()
-            email = reset["email"]
-            if email in users:
-                users[email]["password"] = hash_password(password)
-                save_users(users)
-            delete_password_reset(token_hash)
-            flash("Password changed successfully. Please sign in.", "info")
-            return redirect(url_for("login"))
+@app.route("/reset-password", methods=["GET"])
+def reset_password():
     return render_template("reset_password.html")
+
+
+@app.route("/reset-password/<token>", methods=["GET"])
+def legacy_reset_password(token):
+    # Supabase places the recovery token in the URL fragment, not in the path.
+    return redirect(url_for("reset_password"))
+
+
+@app.route("/api/auth/recovery/update", methods=["POST"])
+def update_recovery_password():
+    data = request.get_json(silent=True) or {}
+    password = data.get("password", "")
+    email = session.get("recovery_email")
+    if not email or not password_is_valid(password):
+        return jsonify({"error": "Verify the OTP first and use an 8-character password."}), 400
+    try:
+        update_supabase_user_password(email, password)
+    except (RuntimeError, requests.RequestException) as exc:
+        app.logger.warning("Custom password update failed: %s", exc)
+        return jsonify({"error": "Unable to update the password right now."}), 400
+    session.pop("recovery_email", None)
+    log_auth_event("PASSWORD_RESET_COMPLETED", email, "password_updated")
+    return jsonify({"success": True})
+
+
+@app.route("/api/auth/recovery/verify-otp", methods=["POST"])
+def verify_recovery_otp():
+    data = request.get_json(silent=True) or {}
+    email = data.get("email", "").strip().lower()
+    token = data.get("token", "").strip()
+    if not re.fullmatch(r"\d{6}", token) or not email:
+        return jsonify({"error": "Enter the 6-digit OTP sent to your email."}), 400
+    record = None
+    if not _supabase_ready():
+        for token_hash, value in load_password_resets().items():
+            if value["email"] == email:
+                record = {"token_hash": token_hash, "expires_at": value["expires_at"]}
+                break
+    else:
+        try:
+            records = _supabase_request(
+                "password_resets",
+                query=f"?select=*&user_email=eq.{quote(email, safe='')}&used_at=is.null&limit=1",
+            )
+        except RuntimeError:
+            return jsonify({"error": "Unable to check the OTP right now."}), 503
+        record = records[0] if records else None
+    if not record:
+        return jsonify({"error": "The OTP is invalid or expired."}), 400
+    try:
+        if isinstance(record["expires_at"], (int, float)):
+            expires_at = float(record["expires_at"])
+        else:
+            expires_at = datetime.fromisoformat(
+                record["expires_at"].replace("Z", "+00:00")
+            ).timestamp()
+    except (KeyError, ValueError):
+        return jsonify({"error": "The OTP is invalid or expired."}), 400
+    if expires_at <= time.time() or not hmac.compare_digest(
+        record.get("token_hash", ""), hash_password(token)
+    ):
+        return jsonify({"error": "The OTP is invalid or expired."}), 400
+    try:
+        delete_password_reset(record["token_hash"])
+    except RuntimeError:
+        return jsonify({"error": "Unable to complete OTP verification."}), 503
+    session["recovery_email"] = email
+    return jsonify({"success": True})
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -1348,27 +2816,39 @@ def register():
             flash("Please fill in all fields.", "error")
         elif password != confirm:
             flash("Passwords do not match.", "error")
-        elif len(password) < 6:
-            flash("Password must be at least 6 characters.", "error")
+        elif not password_is_valid(password):
+            flash("Password must be at least 8 characters.", "error")
         else:
+            if not _supabase_ready():
+                users = load_users()
+                if email in users:
+                    flash("An account with this email already exists.", "error")
+                else:
+                    users[email] = {
+                        "name": name,
+                        "password": hash_password(password),
+                        "provider": "email",
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    save_users(users)
+                    start_user_session(email, name, "email")
+                    return redirect(url_for("app_dashboard"))
+                return render_template("register.html")
             try:
+                if load_user(email):
+                    flash("An account with this email already exists.", "error")
+                    return render_template("register.html")
                 create_user(email, {
                     "name": name,
                     "password": hash_password(password),
                     "provider": "email",
                     "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
-                session["user_email"] = email
-                session["user_name"] = name
-                session["user_provider"] = "email"
+                start_user_session(email, name, "email")
                 return redirect(url_for("app_dashboard"))
             except RuntimeError as exc:
-                message = str(exc)
-                if "HTTP 409" in message:
-                    flash("An account with this email already exists.", "error")
-                else:
-                    app.logger.error("Registration storage is unavailable: %s", exc)
-                    flash("Database is not configured or unavailable. Check your Supabase settings.", "error")
+                app.logger.error("Registration storage is unavailable: %s", exc)
+                flash("Database is not configured or unavailable. Check your Supabase settings.", "error")
     return render_template("register.html")
 
 
@@ -1399,14 +2879,32 @@ def admin_login():
             return redirect(url_for("admin_dashboard"))
 
         users = load_users()
-        if email in users and users[email].get("is_admin") and users[email].get("password") == hash_password(password):
+        stored = users.get(email, {})
+        if stored.get("is_admin") and hmac.compare_digest(
+            stored.get("password") or "", hash_password(password)
+        ):
             session["is_admin"] = True
-            session["user_name"] = users[email]["name"]
+            session["user_name"] = stored["name"]
             session["user_email"] = email
             session["user_provider"] = "admin"
             return redirect(url_for("admin_dashboard"))
 
-        flash("Invalid administrator credentials.", "error")
+        # The browser only ever sees the generic message; the reason goes to the
+        # terminal and the audit log so the operator can tell a wrong email
+        # (no Admin role) apart from a wrong password.
+        if not stored:
+            reason = "no_such_account"
+        elif not stored.get("is_admin"):
+            reason = f"role_is_{stored.get('role', 'unknown')}"
+        else:
+            reason = "bad_password"
+        print(f"Admin sign-in refused for {email or '(empty email)'}: {reason}")
+        log_auth_event("ADMIN_LOGIN_FAILED", email, reason)
+        flash(
+            "Invalid administrator credentials. The admin email must be the account "
+            "whose role is Admin — your regular sign-in email may be a different account.",
+            "error",
+        )
     return render_template("admin_login.html")
 
 
@@ -1564,12 +3062,12 @@ def process_copilot_command(prompt):
                     "status": "SUCCESS"
                 }
             return {
-                "reply": f"ℹ️ IP Address **{ip}** is already in the blacklist.",
+                "reply": f"â„¹ï¸ IP Address **{ip}** is already in the blacklist.",
                 "action_executed": "NONE",
                 "status": "INFO"
             }
         return {
-            "reply": "⚠️ Pakilagay po ang kumpletong IP address na nais ninyong i-block (Halimbawa: *I-block ang IP 203.177.135.10*).",
+            "reply": "âš ï¸ Pakilagay po ang kumpletong IP address na nais ninyong i-block (Halimbawa: *I-block ang IP 203.177.135.10*).",
             "action_executed": "NONE",
             "status": "WARNING"
         }
@@ -1589,7 +3087,7 @@ def process_copilot_command(prompt):
                     "status": "SUCCESS"
                 }
             return {
-                "reply": f"ℹ️ IP Address **{ip}** is not in the blacklist.",
+                "reply": f"â„¹ï¸ IP Address **{ip}** is not in the blacklist.",
                 "action_executed": "NONE",
                 "status": "INFO"
             }
@@ -1598,7 +3096,7 @@ def process_copilot_command(prompt):
     if any(k in p for k in ["scan", "vulnerability", "audit", "security check", "suriin"]):
         scan_results = run_vulnerability_scan()
         return {
-            "reply": f"🛡️ **Vulnerability Security Scan Complete!**\n\n- **Security Rating:** {scan_results['risk_score']} / 100\n- **Total Checks Run:** {scan_results['total_checks']}\n- **Framework Status:** All core modules passing without high-risk CVEs.",
+            "reply": f"ðŸ›¡ï¸ **Vulnerability Security Scan Complete!**\n\n- **Security Rating:** {scan_results['risk_score']} / 100\n- **Total Checks Run:** {scan_results['total_checks']}\n- **Framework Status:** All core modules passing without high-risk CVEs.",
             "action_executed": "VULN_SCAN",
             "data": scan_results,
             "status": "SUCCESS"
@@ -1628,7 +3126,7 @@ def process_copilot_command(prompt):
     if "under attack" in p or "attack mode" in p:
         cur_mode = app.config.get("UNDER_ATTACK_MODE", False)
         app.config["UNDER_ATTACK_MODE"] = not cur_mode
-        new_status = "ENABLED 🛡️" if app.config["UNDER_ATTACK_MODE"] else "DISABLED ⚪"
+        new_status = "ENABLED ðŸ›¡ï¸" if app.config["UNDER_ATTACK_MODE"] else "DISABLED ⚪"
         return {
             "reply": f"🚨 **Under Attack Defense Mode is now {new_status}!**\nStrict rate-limiting and enhanced behavioral heuristic filtering are now active.",
             "action_executed": "TOGGLE_UNDER_ATTACK",
@@ -1665,7 +3163,7 @@ def process_copilot_command(prompt):
     }
 
 def create_system_backup():
-    """Creates a timestamped database snapshot in Supabase."""
+    """Creates a timestamped database snapshot."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_filename = f"scamcheck_backup_{ts}.json"
     payload = {
@@ -1676,11 +3174,15 @@ def create_system_backup():
         "blocked_ips": load_blocked_ips()
     }
     serialized = json.dumps(payload)
-    _supabase_request("backups", method="POST", payload=[{
-        "filename": backup_filename,
-        "payload": payload,
-        "created_by": session.get("user_email", "admin"),
-    }])
+    if not _supabase_ready():
+        os.makedirs(BACKUPS_DIR, exist_ok=True)
+        _write_json_file(os.path.join(BACKUPS_DIR, backup_filename), payload)
+    else:
+        _supabase_request("backups", method="POST", payload=[{
+            "filename": backup_filename,
+            "payload": payload,
+            "created_by": session.get("user_email", "admin"),
+        }])
     return {
         "filename": backup_filename,
         "size_kb": round(len(serialized.encode("utf-8")) / 1024, 2),
@@ -1689,6 +3191,22 @@ def create_system_backup():
 
 def list_system_backups():
     """Lists database backup snapshots."""
+    if not _supabase_ready():
+        entries = []
+        for name in sorted(os.listdir(BACKUPS_DIR), reverse=True):
+            if not name.endswith(".json"):
+                continue
+            full_path = os.path.join(BACKUPS_DIR, name)
+            try:
+                size_kb = round(os.path.getsize(full_path) / 1024, 2)
+            except OSError:
+                size_kb = 0
+            entries.append({
+                "filename": name,
+                "size_kb": size_kb,
+                "created_at": datetime.fromtimestamp(os.path.getmtime(full_path)).strftime("%Y-%m-%d %H:%M:%S"),
+            })
+        return entries
     rows = _supabase_request("backups", query="?select=filename,payload,created_at&order=created_at.desc")
     return [{
         "filename": row["filename"],
@@ -1697,14 +3215,19 @@ def list_system_backups():
     } for row in rows]
 
 def restore_system_backup(filename):
-    """Restores data from a Supabase backup snapshot."""
-    rows = _supabase_request("backups", query=f"?filename=eq.{filename}&select=payload")
-    if not rows:
-        return False, "Backup file not found."
-
-    try:
+    """Restores data from a backup snapshot."""
+    if not _supabase_ready():
+        safe_name = os.path.basename(filename)
+        data = _read_json_file(os.path.join(BACKUPS_DIR, safe_name), {})
+        if not data:
+            return False, "Backup file not found."
+    else:
+        rows = _supabase_request("backups", query=f"?filename=eq.{filename}&select=payload")
+        if not rows:
+            return False, "Backup file not found."
         data = rows[0].get("payload") or {}
 
+    try:
         if "users" in data:
             save_users(data["users"])
         if "audit_logs" in data:
@@ -1779,17 +3302,11 @@ def admin_dashboard():
     total_attacks = len(attacks)
     unique_ips = len(set(l.get("ip") for l in logs if l.get("ip")))
 
-    device_breakdown = {}
-    for l in logs:
-        d = l.get("device", "Desktop")
-        device_breakdown[d] = device_breakdown.get(d, 0) + 1
-
     stats = {
         "total_visits": total_visits,
         "total_attacks": total_attacks,
         "unique_ips": unique_ips,
         "blocked_count": len(blocked_ips),
-        "device_breakdown": device_breakdown,
         "health_score": telemetry["health_score"]
     }
 
@@ -1903,11 +3420,12 @@ def api_admin_update_user_role():
 @app.route("/api/admin/users/update-account", methods=["POST"])
 @admin_required
 def api_admin_update_user_account():
-    """Updates a managed user's name and optionally resets their password."""
+    """Updates a managed user's email, name, and optionally resets their password."""
     data = request.get_json(silent=True) or {}
     email = data.get("email", "").strip().lower()
     name = data.get("name", "").strip()
     password = data.get("password", "")
+    new_email = data.get("new_email", "").strip().lower()
     users = load_users()
     if email not in users:
         return jsonify({"error": "User not found."}), 404
@@ -1915,6 +3433,17 @@ def api_admin_update_user_account():
         return jsonify({"error": "Name is required."}), 400
     if password and not password_is_valid(password):
         return jsonify({"error": "Password must be at least 8 characters."}), 400
+    if new_email and new_email != email:
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", new_email):
+            return jsonify({"error": "That new email address is not valid."}), 400
+        try:
+            rename_user_email(email, new_email)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if session.get("user_email") == email:
+            session["user_email"] = new_email
+        email = new_email
+        users = load_users()
     users[email]["name"] = name
     if password:
         users[email]["password"] = hash_password(password)
@@ -2082,91 +3611,50 @@ def api_admin_clear_logs():
     return jsonify({"success": True, "message": "Telemetry & threat audit logs have been cleared successfully."})
 
 
-def extract_image_text(image_stream):
-    """
-    Extract text using Windows Native OCR (winocr) or pytesseract as fallback.
-    Applies image preprocessing and upscaling to handle phone photos and screenshots.
-    """
-    import asyncio
-    from PIL import Image, ImageEnhance, ImageOps
-
-    try:
-        img = Image.open(image_stream).convert('RGB')
-    except Exception as e:
-        print("Image open error:", e)
-        return ""
-
-    # Scale up small images for better OCR resolution
-    w, h = img.size
-    if w < 1200:
-        scale = 1200 / w
-        img_scaled = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
-    else:
-        img_scaled = img
-
-    extracted_text = ""
-
-    # Tier 1: Windows Native OCR (winocr) — fast, accurate, works on Windows 10/11
-    try:
-        import winocr
-        res = asyncio.run(winocr.recognize_pil(img_scaled, 'en'))
-        if res and res.text and len(res.text.strip()) > 3:
-            extracted_text = res.text.strip()
-    except Exception as e:
-        print("winocr notice:", e)
-
-    # Tier 2: pytesseract as fallback
-    if not extracted_text:
-        try:
-            import pytesseract
-            tesseract_paths = [
-                r"C:\Program Files\Tesseract-OCR\tesseract.exe",
-                r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
-                os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe")
-            ]
-            for p in tesseract_paths:
-                if os.path.exists(p):
-                    pytesseract.pytesseract.tesseract_cmd = p
-                    break
-
-            img_gray = ImageOps.grayscale(img_scaled)
-            enhancer = ImageEnhance.Contrast(img_gray)
-            img_enh = enhancer.enhance(1.8)
-            custom_config = r'--oem 3 --psm 6'
-            extracted_text = pytesseract.image_to_string(img_enh, config=custom_config).strip()
-            if not extracted_text:
-                extracted_text = pytesseract.image_to_string(img_scaled).strip()
-        except Exception as e:
-            print("pytesseract notice:", e)
-
-    return extracted_text
-
 
 @app.post("/api/check")
 def check():
     mode  = request.form.get("mode", "message")
     image = request.files.get("image")
     text  = request.form.get("text", "").strip()
-    ocr_text = ""
+    ocr_text, ocr_lines = "", []
 
-    # OCR extraction (attempted when image is provided)
-    if image and image.filename:
-        ocr_text = extract_image_text(image.stream)
-        print("EXTRACTED OCR TEXT:", ocr_text)
+    # The line geometry returned with the text is reused by the forensics pass,
+    # so an uploaded receipt is only ever read once.
+    raw_image = image.stream.read() if (image and image.filename) else b""
+    if raw_image:
+        ocr_text, ocr_lines = ocr_image(raw_image)
         if ocr_text:
             text = (text + "\n" + ocr_text).strip()
 
     if mode == "receipt":
-        # Receipt mode: use OCR text or pasted text, run receipt analyzer
-        result = analyze_receipt(text)
+        # Receipt mode: OCR text rules + image-level tampering forensics
+        result = merge_receipt_forensics(
+            analyze_receipt(text), analyze_receipt_image(raw_image, ocr_lines)
+        )
 
     elif mode == "article":
+        source_url = request.form.get("source_url", "").strip()
+        title = request.form.get("title", "").strip()
+        page_html = ""
+        if source_url and not text:
+            try:
+                fetched_title, fetched_text, page_html = fetch_article_from_url(source_url)
+                title = title or fetched_title
+                text = fetched_text
+            except (requests.RequestException, ValueError) as exc:
+                app.logger.warning("Article link could not be fetched: %s", exc)
+                return jsonify({
+                    "error": "Hindi mabasa ang article link. Siguraduhing tama ang URL at public ang article."
+                }), 422
+        source_facts = verify_source(source_url, page_html) if source_url else None
         result = analyze_article(
-            request.form.get("title", ""),
+            title,
             text,
-            request.form.get("source_url", ""),
+            source_url,
             request.form.get("author", ""),
-            request.form.get("pub_date", "")
+            request.form.get("pub_date", ""),
+            source_facts
         )
 
     else:
@@ -2179,4 +3667,25 @@ def check():
 
 
 if __name__ == "__main__":
+    if _supabase_ready():
+        print("ScamCheck AI storage backend: Supabase")
+        try:
+            load_blocked_ips()
+        except RuntimeError:
+            print("Warning: Supabase did not answer yet; the first request may be slower.")
+    else:
+        print("ScamCheck AI storage backend: local JSON files (users.json, audit_logs.json)")
+    try:
+        import winocr  # noqa: F401
+        print("Receipt OCR engine: Windows OCR (winocr) is ready")
+    except Exception:
+        print(
+            "Receipt OCR engine: MISSING - receipt images cannot be read. "
+            "Install requirements into this interpreter: " + sys.executable
+        )
+    ready = report_social_config()
+    if ready:
+        print("Social login ready: " + ", ".join(name.title() for name in sorted(ready)))
+    else:
+        print("Social login ready: none (configure Google OAuth Client ID in venv/.env; Facebook/GitHub also need Client Secrets)")
     app.run(debug=os.environ.get("FLASK_DEBUG", "").lower() == "true")

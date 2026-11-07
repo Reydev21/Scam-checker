@@ -1,6 +1,7 @@
 Flask>=3.0
 python-dotenv>=1.0
 requests>=2.31
+google-auth>=2.29
 Pillow>=10.0
 pytesseract>=0.3.10
 winocr>=0.0.15; sys_platform == 'win32'
@@ -23,11 +24,14 @@ winocr>=0.0.15; sys_platform == 'win32'
 # python app.py
 #
 # ==========================================
-# MAHALAGANG PAALALA PARA SA RECEIPT CHECKER (TESSERACT OCR):
+# MAHALAGANG PAALALA PARA SA RECEIPT CHECKER (OCR):
 # ==========================================
-# Para gumana ang pagbasa ng AI sa mga picture ng resibo, kailangan ninyong i-install 
-# mismo ang Tesseract software sa inyong Windows laptop/PC:
-# 
-# 1. I-download ang installer dito: https://github.com/UB-Mannheim/tesseract/wiki
-# 2. I-install ito. 
-# 3. Kung hindi nababasa ng app ang resibo, baka kailangan ninyong ilagay ang Tesseract sa System PATH.
+# Ang pagbasa ng picture ng resibo ay gumagamit ng Windows OCR (winocr) na built-in
+# na sa Windows 10/11. HINDI na kailangan mag-install ng Tesseract software.
+#
+# Kailangan lang na naka-install ang requirements sa STEP 3 sa loob ng venv.
+# Kung nag-run kayo ng "python app.py" nang hindi nag-activate ng venv,
+# magre-restart ang app sa kaugalingon gamit ang .\venv at mag-print ng
+# "Windows OCR is only installed in .\venv - restarting the app with it."
+# Para sa mga picture ng resibo: dapat full-size screenshot ito, hindi preview
+# o forwarded copy na pinalaki/pinaliyit na ang resolution.

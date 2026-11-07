@@ -1,4 +1,9 @@
 .env
+.env.*
+!.env.example
 __pycache__/
 *.pyc
 backups/
+oauth_identities.json
+
+!.env.social.example

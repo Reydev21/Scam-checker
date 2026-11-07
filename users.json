@@ -1,31 +1,56 @@
 {
   "rustiareynielle15@gmail.com": {
     "name": "Reynielle L Rustiaa",
-    "password": "a50f3668e8dd528e30cce3c84a0f61dac9f8afbe6744458fc7ab126d3768f3cb"
+    "password": "a50f3668e8dd528e30cce3c84a0f61dac9f8afbe6744458fc7ab126d3768f3cb",
+    "provider": "email",
+    "role": "Standard User",
+    "is_admin": false,
+    "status": "Active",
+    "created_at": ""
   },
   "rustiareynielle734@gmail.com": {
     "name": "reynielle",
-    "password": "a50f3668e8dd528e30cce3c84a0f61dac9f8afbe6744458fc7ab126d3768f3cb"
+    "password": "a50f3668e8dd528e30cce3c84a0f61dac9f8afbe6744458fc7ab126d3768f3cb",
+    "provider": "email",
+    "role": "Standard User",
+    "is_admin": false,
+    "status": "Active",
+    "created_at": ""
   },
   "google.user@gmail.com": {
     "name": "Google User",
+    "password": null,
     "provider": "google",
+    "role": "Standard User",
+    "is_admin": false,
+    "status": "Active",
     "created_at": "2026-09-01 17:01:01"
   },
   "facebook.user@fb.com": {
     "name": "Facebook User",
+    "password": null,
     "provider": "facebook",
+    "role": "Standard User",
+    "is_admin": false,
+    "status": "Active",
     "created_at": "2026-09-01 17:01:01"
   },
   "developer@github.com": {
     "name": "GitHub Developer",
+    "password": null,
     "provider": "github",
+    "role": "Standard User",
+    "is_admin": false,
+    "status": "Active",
     "created_at": "2026-09-01 17:01:01"
   },
   "rustiareynielle7@gmail.com": {
     "name": "rey",
     "password": "a50f3668e8dd528e30cce3c84a0f61dac9f8afbe6744458fc7ab126d3768f3cb",
     "provider": "email",
+    "role": "Standard User",
+    "is_admin": false,
+    "status": "Active",
     "created_at": "2026-09-08 00:55:22"
   }
 }

@@ -11,6 +11,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="admin-body">
+  {% include "icons_sprite.svg" %}
 
   <!-- ══════════════════════════════
        ADMIN TOPBAR
@@ -67,8 +68,8 @@
           <span class="pulse-dot-red"></span>
           <span>Under Attack Mode: <b id="topAttackStatus">{% if telemetry.under_attack_mode %}ACTIVE{% else %}OFF{% endif %}</b></span>
         </div>
-        <a href="/app" class="btn-admin-nav"><span>🔎</span> Scanner App</a>
-        <a href="/" class="btn-admin-nav"><span>🏠</span> Landing</a>
+        <a href="/app" class="btn-admin-nav"><span><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg></span> Scanner App</a>
+        <a href="/" class="btn-admin-nav"><span><svg class="ic" aria-hidden="true"><use href="#i-home"/></svg></span> Landing</a>
         <div class="admin-user-tag">
           <span class="status-indicator live"></span>
           <span>Admin: <b>{{ admin_user }}</b></span>
@@ -84,22 +85,22 @@
   <div class="admin-tabs-bar">
     <div class="admin-tabs-container">
       <button class="adm-tab active" onclick="switchAdminTab('tab-overview', this)">
-        <span>📊</span> 1. Dashboard & Analytics
+        <span><svg class="ic" aria-hidden="true"><use href="#i-chart"/></svg></span> 1. Dashboard & Analytics
       </button>
       <button class="adm-tab" onclick="switchAdminTab('tab-threats', this)">
-        <span>🚨</span> 2. Cyber Threat & Vuln Scanner
+        <span><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg></span> 2. Cyber Threat & Vuln Scanner
       </button>
       <button class="adm-tab" onclick="switchAdminTab('tab-copilot', this)">
-        <span>🤖</span> 3. AI Copilot Terminal
+        <span><svg class="ic" aria-hidden="true"><use href="#i-bot"/></svg></span> 3. AI Copilot Terminal
       </button>
       <button class="adm-tab" onclick="switchAdminTab('tab-database', this)">
-        <span>💾</span> 4. Database & Backups
+        <span><svg class="ic" aria-hidden="true"><use href="#i-database"/></svg></span> 4. Database & Backups
       </button>
       <button class="adm-tab" onclick="switchAdminTab('tab-users', this)">
-        <span>👥</span> 5. Users & RBAC
+        <span><svg class="ic" aria-hidden="true"><use href="#i-users"/></svg></span> 5. Users & RBAC
       </button>
       <button class="adm-tab" onclick="switchAdminTab('tab-maintenance', this)">
-        <span>⚙️</span> 6. Self-Healing & Cron
+        <span><svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg></span> 6. Self-Healing & Cron
       </button>
     </div>
   </div>
@@ -120,7 +121,7 @@
           </div>
           <div class="admin-header-btns">
             <button class="btn-admin-primary" onclick="refreshLiveTelemetry()">
-              <span>🔄</span> Refresh Telemetry
+              <span><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg></span> Refresh Telemetry
             </button>
           </div>
         </div>
@@ -146,7 +147,7 @@
           <!-- Resource Utilization Gauges -->
           <div class="resource-gauges-card">
             <div class="resource-head">
-              <span class="breakdown-title">⚡ Real-Time Resource Utilization</span>
+              <span class="breakdown-title"><svg class="ic" aria-hidden="true"><use href="#i-bolt"/></svg> Real-Time Resource Utilization</span>
               <span class="badge-count">Live Polling</span>
             </div>
             
@@ -154,7 +155,7 @@
               <!-- CPU -->
               <div class="gauge-item">
                 <div class="gauge-info">
-                  <span>💻 CPU Utilization</span>
+                  <span><svg class="ic" aria-hidden="true"><use href="#i-cpu"/></svg> CPU Utilization</span>
                   <b id="cpuText">{{ telemetry.cpu_percent }}%</b>
                 </div>
                 <div class="gauge-bar"><div class="gauge-fill" id="cpuFill" style="width: {{ telemetry.cpu_percent }}%"></div></div>
@@ -163,7 +164,7 @@
               <!-- RAM -->
               <div class="gauge-item">
                 <div class="gauge-info">
-                  <span>🧠 RAM / Memory Usage</span>
+                  <span><svg class="ic" aria-hidden="true"><use href="#i-activity"/></svg> RAM / Memory Usage</span>
                   <b id="ramText">{{ telemetry.ram_used_gb }} GB / {{ telemetry.ram_total_gb }} GB ({{ telemetry.ram_percent }}%)</b>
                 </div>
                 <div class="gauge-bar"><div class="gauge-fill purple" id="ramFill" style="width: {{ telemetry.ram_percent }}%"></div></div>
@@ -172,7 +173,7 @@
               <!-- Disk -->
               <div class="gauge-item">
                 <div class="gauge-info">
-                  <span>💽 Disk Storage</span>
+                  <span><svg class="ic" aria-hidden="true"><use href="#i-drive"/></svg> Disk Storage</span>
                   <b id="diskText">{{ telemetry.disk_used_gb }} GB / {{ telemetry.disk_total_gb }} GB ({{ telemetry.disk_percent }}%)</b>
                 </div>
                 <div class="gauge-bar"><div class="gauge-fill green" id="diskFill" style="width: {{ telemetry.disk_percent }}%"></div></div>
@@ -184,25 +185,25 @@
         <!-- 4 Stat Metric Cards -->
         <div class="admin-stats-grid">
           <div class="admin-stat-card">
-            <div class="stat-card-head"><span class="stat-icon blue">👥</span><span class="stat-tag info">Total Requests</span></div>
+            <div class="stat-card-head"><span class="stat-icon blue"><svg class="ic" aria-hidden="true"><use href="#i-users"/></svg></span><span class="stat-tag info">Total Requests</span></div>
             <span class="stat-val">{{ stats.total_visits }}</span>
             <span class="stat-meta">Recorded visits & API scans</span>
           </div>
 
           <div class="admin-stat-card highlight-danger">
-            <div class="stat-card-head"><span class="stat-icon red">🚨</span><span class="stat-tag danger">Threats Intercepted</span></div>
+            <div class="stat-card-head"><span class="stat-icon red"><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg></span><span class="stat-tag danger">Threats Intercepted</span></div>
             <span class="stat-val text-red">{{ stats.total_attacks }}</span>
             <span class="stat-meta">SQLi, XSS, Scanners & Bots</span>
           </div>
 
           <div class="admin-stat-card">
-            <div class="stat-card-head"><span class="stat-icon green">🌐</span><span class="stat-tag success">Unique IP Endpoints</span></div>
+            <div class="stat-card-head"><span class="stat-icon green"><svg class="ic" aria-hidden="true"><use href="#i-globe"/></svg></span><span class="stat-tag success">Unique IP Endpoints</span></div>
             <span class="stat-val">{{ stats.unique_ips }}</span>
             <span class="stat-meta">Client networks monitored</span>
           </div>
 
           <div class="admin-stat-card">
-            <div class="stat-card-head"><span class="stat-icon amber">🚫</span><span class="stat-tag warning">Banned Blacklist</span></div>
+            <div class="stat-card-head"><span class="stat-icon amber"><svg class="ic" aria-hidden="true"><use href="#i-ban"/></svg></span><span class="stat-tag warning">Banned Blacklist</span></div>
             <span class="stat-val text-amber">{{ stats.blocked_count }}</span>
             <span class="stat-meta">Banned malicious IPs</span>
           </div>
@@ -212,7 +213,7 @@
         <div class="admin-grid-2col">
           <div class="admin-panel-card">
             <div class="panel-head">
-              <div class="panel-title"><span>📈</span><h3>24-Hour Traffic & Request Flow</h3></div>
+              <div class="panel-title"><span><svg class="ic" aria-hidden="true"><use href="#i-chart"/></svg></span><h3>24-Hour Traffic & Request Flow</h3></div>
               <span class="badge-count">Hourly Volume</span>
             </div>
             <div class="chart-container-box">
@@ -222,7 +223,7 @@
 
           <div class="admin-panel-card">
             <div class="panel-head">
-              <div class="panel-title"><span>🎯</span><h3>Threat Vectors & Attack Distribution</h3></div>
+              <div class="panel-title"><span><svg class="ic" aria-hidden="true"><use href="#i-target"/></svg></span><h3>Threat Vectors & Attack Distribution</h3></div>
               <span class="badge-count danger">Detected Vectors</span>
             </div>
             <div class="chart-container-box">
@@ -245,7 +246,7 @@
           </div>
           <div class="admin-header-btns">
             <button class="btn-admin-primary" onclick="triggerVulnScan()">
-              <span>🛡️</span> Run Full Vulnerability Audit
+              <span><svg class="ic" aria-hidden="true"><use href="#i-shield"/></svg></span> Run Full Vulnerability Audit
             </button>
           </div>
         </div>
@@ -254,7 +255,7 @@
         <div class="vuln-report-card" id="vulnReportBox">
           <div class="vuln-head">
             <div class="vuln-title-box">
-              <span class="vuln-icon">🛡️</span>
+              <span class="vuln-icon"><svg class="ic" aria-hidden="true"><use href="#i-shield"/></svg></span>
               <div>
                 <h3>System Vulnerability & Dependency Rating: <span class="text-green" id="vulnScore">{{ vuln_audit.risk_score }} / 100 (SECURE)</span></h3>
                 <p>Audited at: <span id="vulnTimestamp">{{ vuln_audit.timestamp }}</span> • {{ vuln_audit.total_checks }} Security Checks Executed</p>
@@ -282,7 +283,7 @@
         <div class="admin-simulator-card">
           <div class="simulator-head">
             <div class="sim-title">
-              <span class="sim-icon">⚡</span>
+              <span class="sim-icon"><svg class="ic" aria-hidden="true"><use href="#i-bolt"/></svg></span>
               <div>
                 <h3>Interactive Threat & Attack Simulator</h3>
                 <p>Test the live intrusion detection engine with test payloads to verify real-time monitoring.</p>
@@ -290,10 +291,10 @@
             </div>
           </div>
           <div class="simulator-actions">
-            <button class="btn-sim sqli" onclick="simulateAttack('SQL_INJECTION')"><span>💉</span> Simulate SQL Injection</button>
-            <button class="btn-sim xss" onclick="simulateAttack('XSS_ATTACK')"><span>⚠️</span> Simulate XSS Attack</button>
-            <button class="btn-sim bot" onclick="simulateAttack('MALICIOUS_BOT')"><span>🤖</span> Simulate Scanner Bot</button>
-            <button class="btn-sim lfi" onclick="simulateAttack('PATH_TRAVERSAL')"><span>📁</span> Simulate Path Traversal</button>
+            <button class="btn-sim sqli" onclick="simulateAttack('SQL_INJECTION')"><span><svg class="ic" aria-hidden="true"><use href="#i-bug"/></svg></span> Simulate SQL Injection</button>
+            <button class="btn-sim xss" onclick="simulateAttack('XSS_ATTACK')"><span><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg></span> Simulate XSS Attack</button>
+            <button class="btn-sim bot" onclick="simulateAttack('MALICIOUS_BOT')"><span><svg class="ic" aria-hidden="true"><use href="#i-bot"/></svg></span> Simulate Scanner Bot</button>
+            <button class="btn-sim lfi" onclick="simulateAttack('PATH_TRAVERSAL')"><span><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg></span> Simulate Path Traversal</button>
           </div>
         </div>
 
@@ -311,11 +312,11 @@
                   <div class="attack-feed-item {{ atk.threat_level|lower }}">
                     <div class="atk-top">
                       <span class="atk-type-badge {{ atk.threat_level|lower }}">
-                        {% if atk.type == 'SQL_INJECTION' %}💉 SQL Injection
-                        {% elif atk.type == 'XSS_ATTACK' %}⚠️ XSS Attack
-                        {% elif atk.type == 'PATH_TRAVERSAL' %}📁 Path Traversal
-                        {% elif atk.type == 'MALICIOUS_BOT' %}🤖 Bot Scanner
-                        {% else %}🚨 {{ atk.type }}{% endif %}
+                        {% if atk.type == 'SQL_INJECTION' %}<svg class="ic" aria-hidden="true"><use href="#i-bug"/></svg> SQL Injection
+                        {% elif atk.type == 'XSS_ATTACK' %}<svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg> XSS Attack
+                        {% elif atk.type == 'PATH_TRAVERSAL' %}<svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg> Path Traversal
+                        {% elif atk.type == 'MALICIOUS_BOT' %}<svg class="ic" aria-hidden="true"><use href="#i-bot"/></svg> Bot Scanner
+                        {% else %}<svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg> {{ atk.type }}{% endif %}
                       </span>
                       <span class="atk-time">{{ atk.timestamp }}</span>
                     </div>
@@ -338,7 +339,7 @@
                   </div>
                 {% endfor %}
               {% else %}
-                <div class="empty-feed"><span>🛡️</span><p>No active threats detected. System is running cleanly.</p></div>
+                <div class="empty-feed"><span><svg class="ic" aria-hidden="true"><use href="#i-shield"/></svg></span><p>No active threats detected. System is running cleanly.</p></div>
               {% endif %}
             </div>
           </div>
@@ -346,7 +347,7 @@
           <!-- IP Blacklist Manager -->
           <div class="admin-panel-card">
             <div class="panel-head">
-              <div class="panel-title"><span>🚫</span><h3>IP Blacklist & Banning Manager</h3></div>
+              <div class="panel-title"><span><svg class="ic" aria-hidden="true"><use href="#i-ban"/></svg></span><h3>IP Blacklist & Banning Manager</h3></div>
               <span class="badge-count">{{ blocked_ips|length }} Blocked</span>
             </div>
             <div class="breakdown-body">
@@ -358,7 +359,7 @@
                 {% if blocked_ips %}
                   {% for bip in blocked_ips %}
                     <div class="blocked-ip-item">
-                      <div class="bip-info"><span class="bip-icon">🚫</span><code>{{ bip }}</code></div>
+                      <div class="bip-info"><span class="bip-icon"><svg class="ic" aria-hidden="true"><use href="#i-ban"/></svg></span><code>{{ bip }}</code></div>
                       <button class="btn-unblock" onclick="toggleBlockIp('{{ bip }}')">Unblock</button>
                     </div>
                   {% endfor %}
@@ -373,7 +374,7 @@
         <!-- Full Audit Logs Table -->
         <div class="admin-panel-card full-width">
           <div class="panel-head filterable">
-            <div class="panel-title"><span>📋</span><h3>Complete Access Control & Request Audit Logs</h3></div>
+            <div class="panel-title"><span><svg class="ic" aria-hidden="true"><use href="#i-clipboard"/></svg></span><h3>Complete Access Control & Request Audit Logs</h3></div>
             <div class="log-filter-buttons">
               <button class="btn-filter active" onclick="filterLogs('ALL')">All Requests ({{ logs|length }})</button>
               <button class="btn-filter" onclick="filterLogs('ATTACK')">Attacks Only ({{ stats.total_attacks }})</button>
@@ -399,10 +400,10 @@
                   <tr class="log-row" data-type="{% if log.threat_level in ['CRITICAL', 'HIGH', 'WARNING'] %}ATTACK{% else %}VISIT{% endif %}">
                     <td class="col-time">{{ log.timestamp }}</td>
                     <td>
-                      {% if log.threat_level == 'CRITICAL' %}<span class="badge-status critical">🚨 CRITICAL</span>
-                      {% elif log.threat_level == 'HIGH' %}<span class="badge-status high">⚠️ HIGH THREAT</span>
-                      {% elif log.threat_level == 'WARNING' %}<span class="badge-status warning">⚡ SUSPICIOUS</span>
-                      {% else %}<span class="badge-status safe">✓ NORMAL</span>{% endif %}
+                      {% if log.threat_level == 'CRITICAL' %}<span class="badge-status critical"><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg> CRITICAL</span>
+                      {% elif log.threat_level == 'HIGH' %}<span class="badge-status high"><svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg> HIGH THREAT</span>
+                      {% elif log.threat_level == 'WARNING' %}<span class="badge-status warning"><svg class="ic" aria-hidden="true"><use href="#i-bolt"/></svg> SUSPICIOUS</span>
+                      {% else %}<span class="badge-status safe"><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg> NORMAL</span>{% endif %}
                     </td>
                     <td><code class="ip-code">{{ log.ip }}</code>{% if log.is_blocked %}<span class="tag-blocked-mini">BLOCKED</span>{% endif %}</td>
                     <td><span class="device-badge">{{ log.device }} ({{ log.os }})</span></td>
@@ -442,7 +443,7 @@
           <div class="copilot-chat-card">
             <div class="copilot-head">
               <div class="copilot-bot-info">
-                <span class="copilot-avatar">🤖</span>
+                <span class="copilot-avatar"><svg class="ic" aria-hidden="true"><use href="#i-bot"/></svg></span>
                 <div>
                   <h3>ScamCheck AI Admin Copilot</h3>
                   <span class="copilot-status">● Ready for commands (Tagalog / English)</span>
@@ -454,15 +455,15 @@
             <!-- Messages Stream -->
             <div class="copilot-messages" id="copilotMsgBox">
               <div class="msg-bot">
-                <span class="bot-icon">🤖</span>
+                <span class="bot-icon"><svg class="ic" aria-hidden="true"><use href="#i-bot"/></svg></span>
                 <div class="bot-text">
                   <b>Magandang araw, Administrator!</b> Ako ang iyong AI Copilot. Maaari mo akong utusan na magpatakbo ng server operations o sumuri ng threats gamit ang simpleng Tagalog o English.
                   <div class="sample-chips">
-                    <span onclick="sendPrompt('I-block ang IP 203.177.135.10')">💡 "I-block ang IP 203.177.135.10"</span>
-                    <span onclick="sendPrompt('Mag-scan ng system vulnerabilities')">🛡️ "Mag-scan ng system vulnerabilities"</span>
-                    <span onclick="sendPrompt('I-backup ang database ngayon')">💾 "I-backup ang database ngayon"</span>
-                    <span onclick="sendPrompt('Linisin ang cache at logs')">⚡ "Linisin ang cache at logs"</span>
-                    <span onclick="sendPrompt('Kumusta ang system health')">📊 "Kumusta ang system health"</span>
+                    <span onclick="sendPrompt('I-block ang IP 203.177.135.10')"><svg class="ic" aria-hidden="true"><use href="#i-bulb"/></svg> "I-block ang IP 203.177.135.10"</span>
+                    <span onclick="sendPrompt('Mag-scan ng system vulnerabilities')"><svg class="ic" aria-hidden="true"><use href="#i-shield"/></svg> "Mag-scan ng system vulnerabilities"</span>
+                    <span onclick="sendPrompt('I-backup ang database ngayon')"><svg class="ic" aria-hidden="true"><use href="#i-database"/></svg> "I-backup ang database ngayon"</span>
+                    <span onclick="sendPrompt('Linisin ang cache at logs')"><svg class="ic" aria-hidden="true"><use href="#i-bolt"/></svg> "Linisin ang cache at logs"</span>
+                    <span onclick="sendPrompt('Kumusta ang system health')"><svg class="ic" aria-hidden="true"><use href="#i-chart"/></svg> "Kumusta ang system health"</span>
                   </div>
                 </div>
               </div>
@@ -477,7 +478,7 @@
 
           <!-- Quick Command Cheat Sheet -->
           <div class="copilot-sidebar-card">
-            <h3>⚡ Command Capabilities</h3>
+            <h3><svg class="ic" aria-hidden="true"><use href="#i-bolt"/></svg> Command Capabilities</h3>
             <ul class="capability-list">
               <li><b>IP Firewall:</b> <i>"I-block ang IP..."</i>, <i>"Unblock IP..."</i></li>
               <li><b>Vulnerability Scan:</b> <i>"Suriin ang security vulnerabilities"</i></li>
@@ -503,10 +504,10 @@
           </div>
           <div class="admin-header-btns">
             <button class="btn-admin-primary" onclick="createInstantBackup()">
-              <span>💾</span> Create Instant Backup Now
+              <span><svg class="ic" aria-hidden="true"><use href="#i-database"/></svg></span> Create Instant Backup Now
             </button>
             <button class="btn-admin-nav" onclick="optimizeDbStorage()">
-              <span>⚡</span> Optimize & Compact Storage
+              <span><svg class="ic" aria-hidden="true"><use href="#i-bolt"/></svg></span> Optimize & Compact Storage
             </button>
           </div>
         </div>
@@ -515,7 +516,7 @@
           <!-- Backups Table -->
           <div class="admin-panel-card">
             <div class="panel-head">
-              <div class="panel-title"><span>📦</span><h3>Historical Database Snapshots</h3></div>
+              <div class="panel-title"><span><svg class="ic" aria-hidden="true"><use href="#i-archive"/></svg></span><h3>Historical Database Snapshots</h3></div>
               <span class="badge-count" id="backupCountBadge">{{ backups|length }} Backups</span>
             </div>
             <div class="table-responsive">
@@ -551,7 +552,7 @@
           <!-- Storage Optimizer Info -->
           <div class="admin-panel-card">
             <div class="panel-head">
-              <div class="panel-title"><span>⚡</span><h3>Query & Storage Optimizer</h3></div>
+              <div class="panel-title"><span><svg class="ic" aria-hidden="true"><use href="#i-bolt"/></svg></span><h3>Query & Storage Optimizer</h3></div>
             </div>
             <div class="breakdown-body">
               <div class="opt-card">
@@ -563,7 +564,7 @@
                   <div class="opt-metric-item"><span>Blacklist Entries:</span> <b>{{ blocked_ips|length }} IPs</b></div>
                 </div>
                 <button class="btn-admin-primary" onclick="optimizeDbStorage()" style="width: 100%; margin-top: 16px;">
-                  🚀 Run Database Optimization & Garbage Collector
+                  <svg class="ic" aria-hidden="true"><use href="#i-rocket"/></svg> Run Database Optimization & Garbage Collector
                 </button>
               </div>
             </div>
@@ -586,7 +587,7 @@
 
         <div class="admin-panel-card full-width">
           <div class="panel-head">
-            <div class="panel-title"><span>👥</span><h3>Registered User Accounts Directory</h3></div>
+            <div class="panel-title"><span><svg class="ic" aria-hidden="true"><use href="#i-users"/></svg></span><h3>Registered User Accounts Directory</h3></div>
             <span class="badge-count">{{ users_list|length }} Total Users</span>
           </div>
 
@@ -610,18 +611,18 @@
                     <td><code>{{ u.email }}</code></td>
                     <td>
                       <span class="provider-pill {{ u.provider|lower }}">
-                        {% if u.provider == 'Google' %}🌐 Google
-                        {% elif u.provider == 'Facebook' %}📘 Facebook
-                        {% elif u.provider == 'Github' %}🐙 GitHub
-                        {% elif u.provider == 'Admin' %}🛡️ System Admin
-                        {% else %}✉️ Email{% endif %}
+                        {% if u.provider == 'Google' %}<svg class="ic" aria-hidden="true"><use href="#i-globe"/></svg> Google
+                        {% elif u.provider == 'Facebook' %}<svg class="ic" aria-hidden="true"><use href="#i-facebook"/></svg> Facebook
+                        {% elif u.provider == 'Github' %}<svg class="ic" aria-hidden="true"><use href="#i-code"/></svg> GitHub
+                        {% elif u.provider == 'Admin' %}<svg class="ic" aria-hidden="true"><use href="#i-shield"/></svg> System Admin
+                        {% else %}<svg class="ic" aria-hidden="true"><use href="#i-mail"/></svg> Email{% endif %}
                       </span>
                     </td>
                     <td>
                       <select class="role-select" onchange="updateUserRole('{{ u.email }}', this.value)">
-                        <option value="Admin" {% if u.role == 'Admin' %}selected{% endif %}>🛡️ Admin</option>
-                        <option value="Security Analyst" {% if u.role == 'Security Analyst' %}selected{% endif %}>🔎 Security Analyst</option>
-                        <option value="Standard User" {% if u.role == 'Standard User' %}selected{% endif %}>👤 Standard User</option>
+                        <option value="Admin" {% if u.role == 'Admin' %}selected{% endif %}>Admin</option>
+                        <option value="Security Analyst" {% if u.role == 'Security Analyst' %}selected{% endif %}>Security Analyst</option>
+                        <option value="Standard User" {% if u.role == 'Standard User' %}selected{% endif %}>Standard User</option>
                       </select>
                     </td>
                     <td>
@@ -661,7 +662,7 @@
           <!-- Defense Mode Switch -->
           <div class="admin-panel-card">
             <div class="panel-head">
-              <div class="panel-title"><span>🛡️</span><h3>Under Attack Defense Shield</h3></div>
+              <div class="panel-title"><span><svg class="ic" aria-hidden="true"><use href="#i-shield"/></svg></span><h3>Under Attack Defense Shield</h3></div>
               <span class="badge-count" id="shieldBadge">{% if telemetry.under_attack_mode %}ACTIVE{% else %}STANDBY{% endif %}</span>
             </div>
             <div class="breakdown-body">
@@ -704,7 +705,7 @@
               </div>
 
               <button class="btn-admin-primary" onclick="runSelfHealingMaintenance()" style="margin-top: 14px;">
-                ⚡ Execute Self-Healing Routine Now
+                <svg class="ic" aria-hidden="true"><use href="#i-bolt"/></svg> Execute Self-Healing Routine Now
               </button>
             </div>
           </div>
@@ -718,6 +719,17 @@
        ADMIN INTERACTIVE SCRIPTS
        ══════════════════════════════ -->
   <script>
+    // One guard for all 13 admin calls: an expired session used to hand back the
+    // HTML login page, which broke every panel's res.json().
+    const nativeFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const res = await nativeFetch(...args);
+      if (res.status === 401) {
+        alert("Ang admin session mo ay nag-expire na. Mag-sign in muli sa Security Center.");
+        window.location.href = "/admin/login";
+      }
+      return res;
+    };
     // Tab Switcher
     function switchAdminTab(tabId, btn) {
       document.querySelectorAll('.adm-tab').forEach(b => b.classList.remove('active'));
@@ -842,7 +854,7 @@
         const data = await res.json();
         appendBotMsg(data.reply);
       } catch (err) {
-        appendBotMsg('⚠️ Error processing command: ' + err);
+        appendBotMsg('<svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg> Error processing command: ' + err);
       }
     }
 
@@ -866,7 +878,7 @@
       div.className = 'msg-bot';
       // Simple markdown bold/code replace
       let formatted = text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>').replace(/`(.*?)`/g, '<code>$1</code>').replace(/\n/g, '<br>');
-      div.innerHTML = `<span class="bot-icon">🤖</span><div class="bot-text">${formatted}</div>`;
+      div.innerHTML = `<span class="bot-icon"><svg class="ic" aria-hidden="true"><use href="#i-bot"/></svg></span><div class="bot-text">${formatted}</div>`;
       box.appendChild(div);
       box.scrollTop = box.scrollHeight;
     }
@@ -878,7 +890,7 @@
         const data = await res.json();
         document.getElementById('vulnScore').innerText = `${data.risk_score} / 100 (AUDITED)`;
         document.getElementById('vulnTimestamp').innerText = data.timestamp;
-        alert(`🛡️ Vulnerability Audit Complete! Security Rating: ${data.risk_score}/100`);
+        alert(`Vulnerability Audit Complete! Security Rating: ${data.risk_score}/100`);
       } catch (err) {
         alert('Scan error: ' + err);
       }
@@ -943,11 +955,13 @@
       if (name === null) return;
       const password = prompt('New password (leave blank to keep current):');
       if (password === null) return;
+      const newEmail = prompt('New email address (leave blank to keep ' + email + '):\nUse this if the current mailbox is compromised — pending reset codes for the old email are cancelled.', '');
+      if (newEmail === null) return;
       try {
         const res = await fetch('/api/admin/users/update-account', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: email, name: name, password: password })
+          body: JSON.stringify({ email: email, name: name, password: password, new_email: newEmail.trim() })
         });
         const data = await res.json();
         alert(data.message || data.error);
@@ -989,7 +1003,7 @@
       try {
         const res = await fetch('/api/admin/run-maintenance', { method: 'POST' });
         const data = await res.json();
-        alert(`⚡ ${data.message}`);
+        alert(`${data.message}`);
       } catch (err) {
         alert('Maintenance error: ' + err);
       }
@@ -1027,7 +1041,7 @@
           body: JSON.stringify({ type: attackType })
         });
         const data = await res.json();
-        alert(`🚨 ${data.message}`);
+        alert(`${data.message}`);
         location.reload();
       } catch (err) {
         alert('Simulation error: ' + err);
